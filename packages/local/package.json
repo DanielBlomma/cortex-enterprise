@@ -14,7 +14,8 @@
   "files": ["dist", "models"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch"
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@danielblomma/cortex-core": "*",
