@@ -29,5 +29,8 @@
   "license": "UNLICENSED",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
   }
 }
