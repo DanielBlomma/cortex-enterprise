@@ -57,6 +57,17 @@ function isValidRole(value: string | undefined): value is Role {
   return VALID_ROLES.includes(value as Role);
 }
 
+function stripInlineComment(value: string): string {
+  // Strip # comments that aren't inside quotes
+  const singleMatch = value.match(/^'([^']*)'(\s*#.*)?$/);
+  if (singleMatch) return singleMatch[1];
+  const doubleMatch = value.match(/^"([^"]*)"(\s*#.*)?$/);
+  if (doubleMatch) return doubleMatch[1];
+  // Unquoted: strip from first # preceded by whitespace
+  const commentIdx = value.search(/\s+#/);
+  return commentIdx >= 0 ? value.slice(0, commentIdx).trimEnd() : value;
+}
+
 function parseSimpleYaml(text: string): Record<string, string> {
   const result: Record<string, string> = {};
   let section = "";
@@ -74,14 +85,14 @@ function parseSimpleYaml(text: string): Record<string, string> {
     // Key-value pair (possibly indented under a section)
     const kvMatch = trimmed.match(/^\s+(\w+):\s*(.+?)\s*$/);
     if (kvMatch && section) {
-      result[`${section}.${kvMatch[1]}`] = kvMatch[2];
+      result[`${section}.${kvMatch[1]}`] = stripInlineComment(kvMatch[2]);
       continue;
     }
 
     // Top-level key-value
     const topMatch = trimmed.match(/^(\w+):\s*(.+?)\s*$/);
     if (topMatch) {
-      result[topMatch[1]] = topMatch[2];
+      result[topMatch[1]] = stripInlineComment(topMatch[2]);
     }
   }
   return result;

@@ -120,3 +120,31 @@ telemetry:
   const config = loadEnterpriseConfig(makeTempContext(yaml));
   assert.equal(config.telemetry.enabled, true);
 });
+
+test("inline comments are stripped from values", () => {
+  const yaml = `telemetry:
+  endpoint: https://example.com # my endpoint
+  interval_minutes: 30 # every 30 min
+`;
+  const config = loadEnterpriseConfig(makeTempContext(yaml));
+  assert.equal(config.telemetry.endpoint, "https://example.com");
+  assert.equal(config.telemetry.interval_minutes, 30);
+});
+
+test("quoted values are unquoted", () => {
+  const yaml = `telemetry:
+  endpoint: "https://example.com"
+  api_key: 'tok_abc#123'
+`;
+  const config = loadEnterpriseConfig(makeTempContext(yaml));
+  assert.equal(config.telemetry.endpoint, "https://example.com");
+  assert.equal(config.telemetry.api_key, "tok_abc#123");
+});
+
+test("quoted values with inline comments", () => {
+  const yaml = `telemetry:
+  endpoint: "https://example.com" # production
+`;
+  const config = loadEnterpriseConfig(makeTempContext(yaml));
+  assert.equal(config.telemetry.endpoint, "https://example.com");
+});
