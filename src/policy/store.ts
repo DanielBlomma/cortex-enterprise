@@ -70,7 +70,7 @@ function policiesToYaml(policies: OrgPolicy[]): string {
   const lines = ["rules:"];
   for (const p of policies) {
     lines.push(`  - id: ${p.id}`);
-    lines.push(`    description: "${p.description}"`);
+    lines.push(`    description: "${p.description.replace(/"/g, '\\"')}"`);
     lines.push(`    priority: ${p.priority}`);
     lines.push(`    scope: ${p.scope}`);
     lines.push(`    enforce: ${p.enforce}`);

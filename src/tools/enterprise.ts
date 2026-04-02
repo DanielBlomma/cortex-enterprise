@@ -9,8 +9,11 @@ import { getLastPush } from "../telemetry/sync.js";
 import { syncFromCloud, syncFromLocal, getLastSync } from "../policy/sync.js";
 import { queryAuditLog } from "../audit/query.js";
 import { checkAccess, getAccessDeniedMessage, type Role } from "../rbac/check.js";
+import { version } from "../index.js";
 
 type ToolPayload = Record<string, unknown>;
+
+const VALID_ROLES = new Set<Role>(["admin", "developer", "readonly"]);
 
 function buildToolResult(data: ToolPayload) {
   return {
@@ -41,7 +44,13 @@ export function registerEnterpriseTools(
   contextDir: string,
   policyStore: PolicyStore,
 ): void {
-  const role = (config.rbac.enabled ? config.rbac.default_role : "admin") as Role;
+  const roleCandidate = config.rbac.enabled ? config.rbac.default_role : "admin";
+  const role: Role = VALID_ROLES.has(roleCandidate as Role)
+    ? (roleCandidate as Role)
+    : "readonly";
+  if (!VALID_ROLES.has(roleCandidate as Role) && config.rbac.enabled) {
+    process.stderr.write(`[cortex-enterprise] Invalid RBAC role '${roleCandidate}', falling back to 'readonly'\n`);
+  }
 
   // ── license.status ──
   server.registerTool(
@@ -246,12 +255,16 @@ export function registerEnterpriseTools(
       inputSchema: z.object({}),
     },
     async () => {
+      if (config.rbac.enabled && !checkAccess(role, "enterprise.status")) {
+        return accessDenied(role, "enterprise.status");
+      }
+
       const lastSyncResult = getLastSync();
       const policies = policyStore.getMergedPolicies();
 
       return buildToolResult({
         edition: "enterprise",
-        version: "0.3.0",
+        version,
         license: {
           valid: license.valid,
           customer: license.customer,

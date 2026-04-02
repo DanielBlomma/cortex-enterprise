@@ -70,9 +70,13 @@ export async function register(server: McpServer): Promise<void> {
   if (config.telemetry.enabled) {
     const intervalMs = config.telemetry.interval_minutes * 60000;
     const timer = setInterval(async () => {
-      collector.flush();
-      if (config.telemetry.endpoint) {
-        await pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key);
+      try {
+        collector.flush();
+        if (config.telemetry.endpoint) {
+          await pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key);
+        }
+      } catch (err) {
+        process.stderr.write(`[cortex-enterprise] Telemetry flush error: ${err}\n`);
       }
     }, intervalMs);
     timer.unref();
@@ -82,7 +86,11 @@ export async function register(server: McpServer): Promise<void> {
   if (config.policy.enabled && config.policy.endpoint && config.policy.api_key) {
     const intervalMs = config.policy.sync_interval_minutes * 60000;
     const timer = setInterval(async () => {
-      await syncFromCloud(config.policy.endpoint, config.policy.api_key, policyStore);
+      try {
+        await syncFromCloud(config.policy.endpoint, config.policy.api_key, policyStore);
+      } catch (err) {
+        process.stderr.write(`[cortex-enterprise] Policy sync error: ${err}\n`);
+      }
     }, intervalMs);
     timer.unref();
   }

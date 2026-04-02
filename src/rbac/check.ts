@@ -24,7 +24,7 @@ const PERMISSIONS: Record<string, Role[]> = {
 
 export function checkAccess(role: Role, action: string): boolean {
   const allowed = PERMISSIONS[action];
-  if (!allowed) return true; // unknown actions allowed by default
+  if (!allowed) return false; // deny unknown actions by default
   return allowed.includes(role);
 }
 

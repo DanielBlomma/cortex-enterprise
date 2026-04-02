@@ -1,4 +1,17 @@
+import { z } from "zod";
 import type { OrgPolicy, PolicyStore } from "./store.js";
+
+const CloudPolicySchema = z.object({
+  id: z.string().min(1).max(200),
+  description: z.string().max(1000).default(""),
+  priority: z.number().int().min(0).max(1000).default(50),
+  scope: z.string().max(200).default("global"),
+  enforce: z.boolean().default(true),
+});
+
+const CloudResponseSchema = z.object({
+  rules: z.array(CloudPolicySchema).default([]),
+});
 
 export type SyncResult = {
   success: boolean;
@@ -58,8 +71,9 @@ export async function syncFromCloud(
       return result;
     }
 
-    const data = await response.json() as { rules?: Array<Omit<OrgPolicy, "source">> };
-    const policies: OrgPolicy[] = (data.rules ?? []).map(r => ({ ...r, source: "org" as const }));
+    const raw = await response.json();
+    const data = CloudResponseSchema.parse(raw);
+    const policies: OrgPolicy[] = data.rules.map(r => ({ ...r, source: "org" as const }));
 
     store.writeOrgPolicies(policies);
 
