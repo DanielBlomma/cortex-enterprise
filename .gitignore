@@ -1,5 +1,18 @@
 node_modules/
-dist/
 *.tgz
-keys/private.pem
-models/
+*.tsbuildinfo
+packages/cloud/keys/private.pem
+packages/local/models/
+packages/*/dist/
+packages/*/node_modules/
+# Cortex local storage
+.context/db/
+.context/embeddings/
+.context/cache/
+.context/plan/
+.context/hooks/
+.npm-cache/
+mcp/.npm-cache/
+mcp/dist/
+mcp/node_modules/
+mcp/package-lock.json

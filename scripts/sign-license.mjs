@@ -23,7 +23,7 @@ if (args.length < 1) {
 const inputPath = args[0];
 const outputPath = args[1] || inputPath.replace(/\.lic$/, ".signed.lic");
 
-const privateKeyPath = join(__dirname, "..", "keys", "private.pem");
+const privateKeyPath = join(__dirname, "..", "packages", "cloud", "keys", "private.pem");
 const privateKeyPem = readFileSync(privateKeyPath, "utf8");
 const privateKey = createPrivateKey(privateKeyPem);
 
