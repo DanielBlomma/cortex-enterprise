@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/core" },
     { "path": "packages/local" },
-    { "path": "packages/cloud" }
+    { "path": "packages/cloud" },
+    { "path": "mcp" }
   ]
 }
