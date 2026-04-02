@@ -17,7 +17,7 @@ const cortexRoot = process.argv[2] || join(packageRoot, "..", "cortex");
 const modelName = "Xenova/all-MiniLM-L6-v2";
 
 const sourceDir = join(cortexRoot, ".context", "embeddings", "models", modelName);
-const targetDir = join(packageRoot, "models", modelName);
+const targetDir = join(packageRoot, "packages", "local", "models", modelName);
 
 if (!existsSync(sourceDir)) {
   console.error(`Model not found at: ${sourceDir}`);

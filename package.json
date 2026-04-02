@@ -1,40 +1,26 @@
 {
-  "name": "@danielblomma/cortex-enterprise",
-  "version": "0.3.0",
-  "description": "Enterprise plugin for Cortex MCP — adds licensing, telemetry, policy sync and enterprise tools.",
+  "name": "cortex-enterprise-monorepo",
+  "version": "0.0.0",
+  "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "workspaces": [
+    "packages/core",
+    "packages/local",
+    "packages/cloud",
+    "mcp"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch",
-    "start": "node dist/index.js"
-  },
-  "peerDependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "build": "npm run build --workspaces",
+    "build:core": "npm run build -w packages/core",
+    "build:local": "npm run build -w packages/local",
+    "build:cloud": "npm run build -w packages/cloud",
+    "build:mcp": "npm run build -w mcp",
+    "dev": "tsc -b --watch"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@types/node": "^22.10.1",
     "typescript": "^5.7.2"
   },
-  "files": [
-    "dist",
-    "models"
-  ],
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/DanielBlomma/cortex-enterprise.git"
-  },
-  "author": "Daniel Blomma",
-  "license": "UNLICENSED",
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "zod": "^3.25.76"
   }
 }

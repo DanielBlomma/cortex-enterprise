@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const keysDir = join(__dirname, "..", "keys");
+const keysDir = join(__dirname, "..", "packages", "cloud", "keys");
 
 mkdirSync(keysDir, { recursive: true });
 
@@ -18,8 +18,8 @@ writeFileSync(join(keysDir, "public.pem"), publicKey);
 writeFileSync(join(keysDir, "private.pem"), privateKey);
 
 console.log("Key pair generated:");
-console.log(`  Public:  keys/public.pem`);
-console.log(`  Private: keys/private.pem (KEEP SECRET)`);
+console.log(`  Public:  packages/cloud/keys/public.pem`);
+console.log(`  Private: packages/cloud/keys/private.pem (KEEP SECRET)`);
 console.log();
 console.log("Public key to embed in src/license/public-key.ts:");
 console.log(publicKey);
