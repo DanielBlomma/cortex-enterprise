@@ -1,258 +1,179 @@
 # Cortex Enterprise Air-Gapped
 
+## The problem
+
+Your developers work in a restricted environment — no internet, no cloud services, no data leaving the network. But they still need AI coding assistants to be productive. And you still need governance, audit trails, and compliance proof.
+
+Cortex Enterprise Air-Gapped makes this possible without a single byte leaving the building.
+
+---
+
 ## What it is
 
-Cortex Enterprise Air-Gapped is the fully offline edition for organizations where no data may leave the network. Everything runs on the developer's machine with zero internet dependency. No cloud, no phone-home, no external API calls. Not even during installation.
+Cortex is a layer that sits between your codebase and the AI coding assistant. It reads and understands your code, then feeds the AI the right context — filtered through your organization's rules.
+
+The Air-Gapped edition runs entirely on the developer's machine. No cloud. No internet. No phone-home. Not even during installation. Everything is self-contained in one deliverable package.
 
 ---
 
 ## How it works
 
+Think of it like this:
+
 ```
-Developer's machine (fully offline)
-==========================================
-
-  +---------------------------------------+
-  |                                       |
-  |  Cortex (local)                       |
-  |  +----------------------------------+ |
-  |  |                                  | |
-  |  |  Ingest        Reads your code,  | |
-  |  |                builds the index  | |
-  |  |                                  | |
-  |  |  Embeddings    Bundled AI model, | |
-  |  |  (bundled)     no download needed| |
-  |  |                                  | |
-  |  |  Graph         Knowledge graph   | |
-  |  |                of your codebase  | |
-  |  |                                  | |
-  |  |  Rules         Local YAML files  | |
-  |  |  Engine        govern all output | |
-  |  |                                  | |
-  |  |  MCP Server    Connects to your  | |
-  |  |                AI coding agent   | |
-  |  |                                  | |
-  |  |  Audit Log     Full trail of     | |
-  |  |                every action      | |
-  |  |                                  | |
-  |  |  Dashboard     Usage stats and   | |
-  |  |                ROI metrics       | |
-  |  +----------------------------------+ |
-  |                                       |
-  |  License file (.lic)                  |
-  |  Signed offline, no network check     |
-  |                                       |
-  |  Network: OFF                         |
-  +---------------------------------------+
-
-==========================================
+  Developer's machine (no internet)
+  +------------------------------------+
+  |                                    |
+  |  Your code                         |
+  |      |                             |
+  |      v                             |
+  |  Cortex reads and indexes it       |
+  |      |                             |
+  |      v                             |
+  |  Rules filter what the AI can see  |
+  |      |                             |
+  |      v                             |
+  |  AI assistant gets governed        |
+  |  context — nothing forbidden,      |
+  |  nothing outdated, nothing wrong   |
+  |      |                             |
+  |  Every interaction is logged       |
+  |                                    |
+  |  Network: OFF                      |
+  +------------------------------------+
 ```
 
-### Step by step
+### The flow
 
-1. **Deliver the package** -- We provide a pre-built `.tgz` file (or Docker image) containing Cortex, the enterprise plugin, and a bundled embedding model. Delivery happens through your secure channel: USB drive, internal portal, or approved file transfer.
+1. **We deliver the software** — You receive a single package file containing everything: Cortex, the enterprise features, and a built-in AI model for understanding code. This is delivered through your approved channel — a USB drive, your internal software portal, or any secure file transfer you already use.
 
-2. **Install offline** -- The developer installs from the local file. No npm registry, no internet.
-   ```bash
-   npm i -g danielblomma-cortex-enterprise-0.3.0.tgz
-   ```
+2. **Your IT team installs it** — A standard software install from the local file. No internet connection is needed at any point. No external downloads happen during or after installation.
 
-3. **Place the license file** -- A signed `.lic` file goes in `.context/cortex.lic`. This file contains your organization name, expiry date, and allowed features. It is cryptographically signed using Ed25519. Verification uses a public key embedded in the software. No network call is made.
+3. **A license file activates it** — We provide a digitally signed license file containing your organization's name, the expiry date, and which features are enabled. Cortex verifies this signature using a key that's built into the software. No license server. No activation call. It works the same way whether the machine is online or has never seen the internet.
 
-4. **Place the rules files** -- Organization-wide rules go in `.context/policies/org-rules.yaml`. These are plain YAML files that your security or platform team distributes through internal channels (git, USB, internal portal). Per-project rules go in `.context/rules.yaml`.
+4. **Your security team distributes the rules** — Organization-wide rules are simple text files. Your security or platform team writes them and distributes them through your internal channels — the same way you distribute any configuration today. Examples of rules:
+   - "AI agents must never surface deprecated code"
+   - "The authentication module is off-limits without architecture approval"
+   - "Always prioritize official documentation over legacy code"
 
-5. **Cortex starts and validates** -- On startup, Cortex reads the license file, verifies the signature offline, loads all rules, and registers enterprise tools. If the license is valid, it shows `[Enterprise]` in the dashboard. If not, it falls back to community mode silently.
+5. **Developers use their AI tools normally** — When a developer's AI coding assistant asks Cortex for context about the codebase, Cortex applies the rules automatically. The developer doesn't need to know or think about the rules. They just get better, governed results.
 
-6. **AI agents follow the rules** -- When an AI coding agent asks Cortex for context, the rules engine applies all active rules. Org rules override local rules when they share the same ID. Rules are sorted by priority and enforced in order.
-
-7. **Everything is audited locally** -- Every tool call is logged to `.context/audit/` as daily JSONL files. Your compliance team can export these for review. Nothing is sent anywhere.
+6. **Everything is logged locally** — Every interaction is written to a log file on the machine: what the AI asked for, what it received, which rules were applied. Your compliance team can collect and review these logs through your existing processes.
 
 ---
 
 ## What gets sent over the network
 
-Nothing. Zero network traffic. Verified by running with network disabled.
+**Nothing.**
+
+Zero network traffic. The software is designed to work with the network cable unplugged. We verify this by testing with network access completely disabled.
 
 ---
 
-## The license file
+## The license
 
-The license file is a signed text document. No license server, no activation, no phone-home.
+Traditional software licensing requires "phoning home" to a license server. We don't do that.
 
-```
-customer: ACME Corp
-edition: air-gapped
-issued: 2026-04-02
-expires: 2027-04-02
-max_repos: 50
-features: audit_log,policy_local,bundled_embeddings
----
-<base64-encoded Ed25519 signature>
-```
+Instead, you receive a license file — a small text document with a digital signature. Think of it like a notarized letter: anyone can verify it's authentic by checking the signature, but no one needs to call the notary to do so.
 
-How validation works:
+The license contains:
+- Your organization's name
+- The expiry date
+- How many projects you can use it with
+- Which features are enabled
 
-1. Cortex reads the file and splits it at the `---` separator
-2. The payload (above the line) is verified against the signature (below the line) using an Ed25519 public key that is embedded in the software
-3. If the signature matches and the expiry date hasn't passed, the license is valid
-4. If the license expires within 30 days, a warning is shown
-5. If the license is invalid or expired, enterprise features are disabled and Cortex falls back to community mode
+**Renewal** is simple: we send you a new license file through your secure channel. You replace the old one. No downtime, no reinstall.
 
-Renewal: you receive a new `.lic` file through your secure channel. Replace the old file. No downtime.
+If the license expires, Cortex doesn't break — it simply falls back to the free community edition until you renew.
 
 ---
 
-## The rules files
+## The rules
 
-### Organization-wide rules (distributed by your security/platform team)
+Rules are plain-text files that your security or platform team writes and distributes. There are two levels:
 
-File: `.context/policies/org-rules.yaml`
+### Organization-wide rules
 
-```yaml
-rules:
-  - id: rule.no_secrets_in_code
-    description: "Secrets must never appear in source files."
-    priority: 100
-    scope: global
-    enforce: true
+Written by your security team. Distributed to all projects through your internal channels (the same way you distribute any policy today). These are the guardrails that apply everywhere.
 
-  - id: rule.auth_adr_required
-    description: "No agent may modify /auth without ADR approval."
-    priority: 100
-    scope: api
-    enforce: true
+**Examples:**
+- "Passwords and secrets must never appear in AI context"
+- "No AI modifications to the payment processing module without approval"
+- "Database changes require review from the data team"
 
-  - id: rule.migration_review
-    description: "Database migrations require data team review."
-    priority: 95
-    scope: global
-    enforce: true
-```
+### Project-level rules
 
-### Per-project rules (managed by the project team)
+Written by each project team for their specific needs. These handle local concerns.
 
-File: `.context/rules.yaml`
+**Examples:**
+- "Always prioritize the API specification document"
+- "Exclude test fixtures from AI context"
+- "Flag conflicting documentation instead of guessing"
 
-```yaml
-rules:
-  - id: rule.source_of_truth
-    description: "Source-of-truth entities get priority in search results."
-    priority: 100
-    scope: global
-    enforce: true
+### When both exist
 
-  - id: rule.deprecated_filter
-    description: "Deprecated entities are excluded unless explicitly requested."
-    priority: 95
-    scope: global
-    enforce: true
-```
-
-### How merge works
-
-Org rules always win. If an org rule and a local rule have the same `id`, the org rule replaces the local one. All rules are then sorted by priority (highest first) and applied in that order.
+Organization rules always win. If a project rule conflicts with an organization rule, the organization rule takes priority. This ensures central governance while still allowing teams to manage their own local standards.
 
 ---
 
-## Audit trail
+## The audit trail
 
-Every action is logged to `.context/audit/YYYY-MM-DD.jsonl`:
+Every time an AI assistant interacts with Cortex, it's logged:
 
-```json
-{
-  "timestamp": "2026-04-02T14:32:01.000Z",
-  "tool": "context.search",
-  "input": { "query": "authentication flow" },
-  "result_count": 5,
-  "entities_returned": ["src/auth/login.ts", "src/auth/session.ts"],
-  "rules_applied": ["rule.source_of_truth", "rule.deprecated_filter"],
-  "duration_ms": 42
-}
-```
+- **When** it happened
+- **What** the AI asked for
+- **What** Cortex returned
+- **Which rules** were applied
+- **How long** it took
 
-These files are plain text (one JSON object per line). Export them, archive them, feed them into your SIEM. They never leave the machine unless you move them.
+These logs are stored as simple text files on the developer's machine. Your compliance team can collect them through your existing processes — copy them to a shared drive, feed them into your SIEM, or archive them however you normally handle audit data.
 
-Default retention: 90 days (configurable).
+Logs are kept for 90 days by default (configurable).
 
 ---
 
-## Configuration
+## What's in the package
 
-Minimal config for air-gapped. File: `.context/enterprise.yaml`
+Everything needed to run, with no external dependencies:
 
-```yaml
-telemetry:
-  enabled: false
-
-audit:
-  enabled: true
-  retention_days: 90
-
-policy:
-  enabled: true
-
-rbac:
-  enabled: false
-  default_role: developer
-```
-
-No endpoints, no API keys. Everything is local.
-
----
-
-## Installation
-
-```bash
-# Delivered via secure channel (USB, internal portal, approved file transfer)
-npm i -g danielblomma-cortex-enterprise-0.3.0.tgz
-
-# Or via Docker
-docker load < cortex-enterprise-0.3.0.tar
-docker run cortex-enterprise
-```
-
-Updates: we deliver a new `.tgz` or Docker image through the same secure channel. Replace the old package.
-
----
-
-## What is included in the package
-
-| Component | Description |
-|-----------|-------------|
-| Cortex core | Ingest, graph, search, MCP server, dashboard |
-| Enterprise plugin | License validation, policy engine, audit log, RBAC |
-| Embedding model | Bundled AI model for generating code embeddings (no HuggingFace download) |
-| All dependencies | Fully self-contained, no post-install downloads |
+| Component | What it does |
+|---|---|
+| Cortex core | Reads your code, builds an understanding of it, answers AI questions |
+| Enterprise features | License validation, rule enforcement, audit logging, access control |
+| Built-in AI model | Understands code structure without downloading anything from the internet |
+| All dependencies | Fully self-contained — nothing is fetched after install |
 
 ---
 
 ## Who is this for
 
-- Banks and financial institutions
-- Defense and intelligence organizations
-- Government agencies
-- Healthcare organizations handling patient data
-- Any environment where data must not leave the network
+- **Banks and financial institutions** — Regulatory requirements prohibit code or data leaving the network
+- **Defense and intelligence** — Classified environments with no internet access
+- **Government agencies** — Strict data sovereignty and air-gap requirements
+- **Healthcare** — Patient data regulations require complete network isolation
+- **Any organization** where "no data leaves the building" is not negotiable
 
 ---
 
 ## Pricing
 
-Annual site license, ~$50,000-200,000/year depending on scale.
+**Annual site license: $50,000 - $200,000/year** depending on the number of developers and projects.
 
-Includes: pre-built packages, license file, bundled embedding model, offline documentation, and dedicated support channel.
+Includes: the complete software package, license file, built-in AI model, offline documentation, and a dedicated support channel.
 
 ---
 
-## Summary
+## At a glance
 
-| | |
+| Question | Answer |
 |---|---|
-| Internet required | No. Zero network traffic. |
-| Source code leaves machine | Never |
-| Authentication | Signed license file (Ed25519, offline) |
-| Rules management | YAML files distributed via internal channels |
-| Analytics | Local dashboard on each machine |
-| Audit trail | Local JSONL files, exportable |
-| Updates | New package delivered via secure channel |
-| Typical customer | Bank, defense, government, healthcare |
+| Does it need internet? | No. Zero network traffic, ever. |
+| Does source code leave the machine? | Never. |
+| How is it installed? | From a file delivered through your secure channel. |
+| How is it licensed? | A signed license file verified offline. No license server. |
+| How are rules managed? | Text files distributed through your internal channels. |
+| Is there analytics? | Yes, a local dashboard on each machine. |
+| Is there an audit trail? | Yes, log files on each machine. Exportable. |
+| How are updates delivered? | New package through your secure channel. |
+| What if the license expires? | Falls back to the free edition. Nothing breaks. |
+| How long does setup take? | Under 30 minutes per machine. |

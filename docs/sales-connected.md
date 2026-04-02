@@ -1,151 +1,139 @@
 # Cortex Enterprise Connected
 
+## The problem
+
+Your developers use AI coding assistants every day — tools like Claude Code, Copilot, and Cursor. These tools are powerful, but as an organization you have no way to control what they see, measure what they save you, or prove to auditors what they did.
+
+Cortex Enterprise Connected solves this.
+
+---
+
 ## What it is
 
-Cortex Enterprise Connected gives your organization centralized control over how AI coding agents behave across all your repositories. Every developer runs Cortex locally on their machine. A lightweight cloud layer ties it all together with shared rules, usage analytics, and a full audit trail.
+Cortex is a layer that sits between your codebase and the AI coding assistant. It reads and understands your code, then feeds the AI the right context — filtered through your organization's rules.
 
-No source code ever leaves the developer's machine.
+The Connected edition adds a central cloud dashboard where you manage rules, see usage across all teams, and get a complete audit trail. Your developers don't need to change how they work. Cortex runs quietly in the background.
+
+**Your source code never leaves the developer's machine.**
 
 ---
 
 ## How it works
 
+Think of it like this:
+
 ```
-Your organization
-==========================================
-
-  Cortex Cloud (hosted)
-  +-----------------------------------------+
-  |                                         |
-  |  Policy Rules    Analytics    Auth      |
-  |  "No agent may   Token ROI   SSO/SAML  |
-  |   touch /auth    per team    login      |
-  |   without ADR"   per repo               |
-  |                                         |
-  +-----^-----------^-----------+-----------+
-        |           |           |
-        |telemetry  |telemetry  | rules
-        |           |           v
-  +-----+---+ +----+----+ +----+----+
-  | Dev A    | | Dev B   | | Dev C   |
-  | laptop   | | laptop  | | laptop  |
-  |          | |         | |         |
-  | Cortex   | | Cortex  | | Cortex  |
-  | (local)  | | (local) | | (local) |
-  +----------+ +---------+ +---------+
-
-  Code stays    Code stays    Rules flow
-  on laptop     on laptop     down to all
-==========================================
+         Your cloud dashboard
+         (rules, analytics, audit)
+               |          ^
+     rules     |          |  usage stats
+     flow      |          |  (no code)
+     down      v          |
+         +-----+----------+-----+
+         |     |          |     |
+      Dev A  Dev B     Dev C  Dev D
+      Each developer runs Cortex locally.
+      Code stays on their machine.
+      AI assistants get governed context.
 ```
 
-### Step by step
+### The flow
 
-1. **Install** -- Each developer installs Cortex and the enterprise plugin from a private npm registry using a company auth token.
+1. **Your admin writes rules** — Plain-English rules like "AI agents must never see deprecated code" or "The authentication module requires architecture review before changes." These are created in the cloud dashboard.
 
-2. **Authenticate** -- Developers log in through your existing identity provider (SSO/SAML). No separate passwords.
+2. **Rules push to every developer automatically** — When a developer starts their workday, Cortex picks up the latest rules from the dashboard. This happens in the background. The developer doesn't need to do anything.
 
-3. **Rules sync automatically** -- An admin creates organization-wide rules in the Cortex Cloud dashboard. These rules push down to every developer's local Cortex automatically (on startup + every 4 hours). Local project rules still work and are merged in, but org rules always take priority.
+3. **The AI assistant asks Cortex for context** — When a developer uses their AI coding tool, the tool asks Cortex "what do I need to know about this codebase?" Cortex answers based on the code AND the rules. Forbidden areas are filtered out. Important files get priority. Conflicts are flagged instead of guessed at.
 
-4. **AI agents follow the rules** -- When an AI agent (Claude Code, Copilot, Cursor) asks Cortex for context, the rules engine decides what gets returned. For example: deprecated code is filtered out, source-of-truth files get priority, and certain areas can be locked behind ADR approval.
+4. **Usage data flows back (never code)** — Cortex sends simple numbers to the dashboard: how many times was it used today, how many AI tokens were saved, how fresh is the index. It never sends source code, file contents, or what the developer searched for.
 
-5. **Usage data flows up (anonymized)** -- Cortex sends lightweight metrics to the cloud: how many searches, how many tokens saved, index freshness. Never source code, never file contents, never embeddings.
-
-6. **Everything is audited** -- Every tool call is logged: what was asked, what was returned, which rules applied. Audit logs are stored locally and optionally pushed to the cloud for centralized review.
+5. **Everything is logged** — Every interaction between the AI and Cortex is recorded: what was asked, what was returned, which rules applied. These logs live on the developer's machine and can optionally be pushed to the dashboard for centralized review.
 
 ---
 
-## What gets sent to the cloud
+## What does "no code leaves the machine" actually mean?
 
-| Sent | Never sent |
-|------|------------|
-| Search count | Source code |
-| Token savings estimate | File contents |
-| Index freshness percentage | Embeddings |
-| Policy sync requests | Graph data |
-| Auth tokens (SSO) | Search queries (unless opt-in) |
+This is the most important thing to understand:
 
----
+| What IS sent to the cloud | What is NEVER sent |
+|---|---|
+| "Cortex was used 47 times today" | Your source code |
+| "Estimated 12,000 tokens saved" | File contents |
+| "Index is 94% fresh" | What the developer searched for |
+| "These 3 rules were applied" | The AI's generated code |
 
-## What the admin sees
-
-- **Analytics dashboard** -- Aggregated token savings, search frequency, and index freshness across all repos and teams.
-- **Policy management** -- Create, edit, and push rules to all repos from one place.
-- **Audit trail** -- Search what any agent did, when, and which rules governed the response. Exportable for SOC2/ISO 27001 compliance.
-- **Role management** -- Assign roles: admin (manage policies), developer (use tools), readonly (view dashboards).
+The cloud only sees numbers and rule names. It has no visibility into your code.
 
 ---
 
-## Configuration
+## What you get as an organization
 
-The developer's machine needs one file: `.context/enterprise.yaml`
+### Rules that apply everywhere
 
-```yaml
-telemetry:
-  enabled: true
-  endpoint: https://cloud.cortex.dev/api/telemetry
-  api_key: ctx_live_abc123
-  interval_minutes: 60
+You write a rule once. It applies to every developer, every repo, every AI tool — automatically. No need to trust that each team configured things correctly. Examples:
 
-audit:
-  enabled: true
-  retention_days: 90
+- "Deprecated code must be hidden from AI agents"
+- "The payments module requires senior review before AI changes"
+- "Always prioritize the official architecture documents over old code"
 
-policy:
-  enabled: true
-  endpoint: https://cloud.cortex.dev/api/policies
-  api_key: ctx_live_abc123
-  sync_interval_minutes: 240
+### Usage analytics
 
-rbac:
-  enabled: true
-  default_role: developer
-```
+A dashboard that answers: Are our developers actually using AI effectively? How many tokens are we saving? Which repos have stale indexes? This is the data you need to justify the investment to leadership.
 
-That's it. Everything else is automatic.
+### Audit trail for compliance
+
+Every AI-assisted action is recorded. When an auditor asks "how do you govern your AI tools?", you have a complete, searchable log. Exportable for SOC2, ISO 27001, and internal compliance reviews.
+
+### Role-based access
+
+- **Admins** manage rules, view all analytics, run compliance reports
+- **Developers** use the tools, see their own usage
+- **Read-only** viewers see dashboards but can't change anything
+
+### Single sign-on
+
+Developers log in with their existing company credentials. No separate account needed.
 
 ---
 
-## Installation
+## What the developer experiences
 
-```bash
-# One-time npm auth setup
-echo "//npm.pkg.github.com/:_authToken=YOUR_TOKEN" >> ~/.npmrc
+Almost nothing changes. They install Cortex once (IT can automate this). After that:
 
-# Install
-npm i -g @danielblomma/cortex-enterprise --registry=https://npm.pkg.github.com
-```
+- Their AI coding assistant gets better context, automatically
+- Organization rules are enforced without the developer needing to think about it
+- A small dashboard shows their personal usage stats
 
-Updates happen automatically through the same registry.
+No new workflows. No extra steps. It just works in the background.
 
 ---
 
 ## Who is this for
 
-- Tech companies with 50-500+ developers
-- Organizations that need governance over AI agent behavior
-- Teams that want ROI data to justify AI tooling investment
-- Companies required to demonstrate audit trails for compliance (SOC2, ISO 27001)
+- **Tech companies** with 50 to 500+ developers using AI coding tools
+- **Engineering leaders** who need to prove ROI on AI investments
+- **Compliance teams** who need audit trails for AI-assisted development
+- **Platform teams** who want consistent rules across all repositories
 
 ---
 
 ## Pricing
 
-~$30 per developer per month.
+**~$30 per developer per month**
 
-Includes: cloud dashboard, policy sync, analytics, audit trail, SSO/SAML, and priority support.
+Includes the cloud dashboard, rule management, analytics, audit trail, single sign-on, and priority support.
 
 ---
 
-## Summary
+## At a glance
 
-| | |
+| Question | Answer |
 |---|---|
-| Internet required | Yes (minimal, metadata only) |
-| Source code leaves machine | Never |
-| Authentication | SSO/SAML via your identity provider |
-| Rules management | Centralized cloud dashboard |
-| Analytics | Aggregated dashboard across all repos |
-| Audit trail | Local + cloud, exportable |
-| Updates | Automatic via npm registry |
-| Typical customer | SaaS, consultancy, tech company |
+| Does it need internet? | Yes, but only for syncing rules and usage stats. Minimal traffic. |
+| Does source code leave the machine? | Never. |
+| How do developers log in? | Through your existing identity provider (SSO). |
+| How are rules managed? | Centrally, from a web dashboard. |
+| Can we see usage across all teams? | Yes, aggregated analytics dashboard. |
+| Is there an audit trail? | Yes, every AI interaction is logged. Exportable. |
+| How are updates delivered? | Automatically, same as any software package. |
+| How long does setup take? | Under an hour for most teams. |
