@@ -13,9 +13,23 @@ export type AuditConfig = {
   retention_days: number;
 };
 
+export type PolicyConfig = {
+  enabled: boolean;
+  endpoint: string;
+  api_key: string;
+  sync_interval_minutes: number;
+};
+
+export type RBACConfig = {
+  enabled: boolean;
+  default_role: string;
+};
+
 export type EnterpriseConfig = {
   telemetry: TelemetryConfig;
   audit: AuditConfig;
+  policy: PolicyConfig;
+  rbac: RBACConfig;
 };
 
 const DEFAULTS: EnterpriseConfig = {
@@ -28,6 +42,16 @@ const DEFAULTS: EnterpriseConfig = {
   audit: {
     enabled: true,
     retention_days: 90,
+  },
+  policy: {
+    enabled: true,
+    endpoint: "",
+    api_key: "",
+    sync_interval_minutes: 240,
+  },
+  rbac: {
+    enabled: false,
+    default_role: "developer",
   },
 };
 
@@ -83,6 +107,16 @@ export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
     audit: {
       enabled: fields["audit.enabled"] !== "false",
       retention_days: parseInt(fields["audit.retention_days"] ?? "", 10) || DEFAULTS.audit.retention_days,
+    },
+    policy: {
+      enabled: fields["policy.enabled"] !== "false",
+      endpoint: fields["policy.endpoint"] ?? DEFAULTS.policy.endpoint,
+      api_key: fields["policy.api_key"] ?? DEFAULTS.policy.api_key,
+      sync_interval_minutes: parseInt(fields["policy.sync_interval_minutes"] ?? "", 10) || DEFAULTS.policy.sync_interval_minutes,
+    },
+    rbac: {
+      enabled: fields["rbac.enabled"] === "true",
+      default_role: fields["rbac.default_role"] ?? DEFAULTS.rbac.default_role,
     },
   };
 }

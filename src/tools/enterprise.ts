@@ -4,8 +4,11 @@ import type { LicenseInfo } from "../license/check.js";
 import type { EnterpriseConfig } from "../config.js";
 import type { TelemetryCollector } from "../telemetry/collector.js";
 import type { AuditWriter } from "../audit/writer.js";
+import type { PolicyStore } from "../policy/store.js";
 import { getLastPush } from "../telemetry/sync.js";
+import { syncFromCloud, syncFromLocal, getLastSync } from "../policy/sync.js";
 import { queryAuditLog } from "../audit/query.js";
+import { checkAccess, getAccessDeniedMessage, type Role } from "../rbac/check.js";
 
 type ToolPayload = Record<string, unknown>;
 
@@ -21,6 +24,14 @@ function buildToolResult(data: ToolPayload) {
   };
 }
 
+function accessDenied(role: Role, action: string) {
+  return buildToolResult({
+    error: getAccessDeniedMessage(role, action),
+    role,
+    action,
+  });
+}
+
 export function registerEnterpriseTools(
   server: McpServer,
   license: LicenseInfo,
@@ -28,7 +39,10 @@ export function registerEnterpriseTools(
   auditWriter: AuditWriter | null,
   config: EnterpriseConfig,
   contextDir: string,
+  policyStore: PolicyStore,
 ): void {
+  const role = (config.rbac.enabled ? config.rbac.default_role : "admin") as Role;
+
   // ── license.status ──
   server.registerTool(
     "license.status",
@@ -37,6 +51,10 @@ export function registerEnterpriseTools(
       inputSchema: z.object({}),
     },
     async () => {
+      if (config.rbac.enabled && !checkAccess(role, "license.status")) {
+        return accessDenied(role, "license.status");
+      }
+
       auditWriter?.log({
         timestamp: new Date().toISOString(),
         tool: "license.status",
@@ -69,6 +87,10 @@ export function registerEnterpriseTools(
       inputSchema: z.object({}),
     },
     async () => {
+      if (config.rbac.enabled && !checkAccess(role, "telemetry.status")) {
+        return accessDenied(role, "telemetry.status");
+      }
+
       const metrics = collector.getMetrics();
       const lastPush = getLastPush();
 
@@ -105,6 +127,10 @@ export function registerEnterpriseTools(
       }),
     },
     async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "audit.query")) {
+        return accessDenied(role, "audit.query");
+      }
+
       const parsed = z.object({
         from: z.string().optional(),
         to: z.string().optional(),
@@ -131,6 +157,87 @@ export function registerEnterpriseTools(
     },
   );
 
+  // ── policy.list ──
+  server.registerTool(
+    "policy.list",
+    {
+      description: "List all active policies (org + local merged). Org rules override local rules with same ID.",
+      inputSchema: z.object({
+        source: z.enum(["all", "org", "local"]).default("all").describe("Filter by policy source"),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "policy.list")) {
+        return accessDenied(role, "policy.list");
+      }
+
+      const parsed = z.object({
+        source: z.enum(["all", "org", "local"]).default("all"),
+      }).parse(input ?? {});
+
+      let policies = policyStore.getMergedPolicies();
+
+      if (parsed.source !== "all") {
+        policies = policies.filter(p => p.source === parsed.source);
+      }
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "policy.list",
+        input: parsed as Record<string, unknown>,
+        result_count: policies.length,
+        entities_returned: policies.map(p => p.id),
+        rules_applied: [],
+        duration_ms: 0,
+      });
+
+      return buildToolResult({
+        count: policies.length,
+        policies: policies.map(p => ({
+          id: p.id,
+          description: p.description,
+          priority: p.priority,
+          scope: p.scope,
+          enforce: p.enforce,
+          source: p.source,
+        })),
+      });
+    },
+  );
+
+  // ── policy.sync ──
+  server.registerTool(
+    "policy.sync",
+    {
+      description: "Trigger manual policy sync. Connected: pulls from cloud API. Air-gapped: reloads local org-rules.yaml.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      if (config.rbac.enabled && !checkAccess(role, "policy.sync")) {
+        return accessDenied(role, "policy.sync");
+      }
+
+      let result;
+      if (config.policy.endpoint && config.policy.api_key) {
+        result = await syncFromCloud(config.policy.endpoint, config.policy.api_key, policyStore);
+      } else {
+        result = syncFromLocal(policyStore);
+      }
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "policy.sync",
+        input: {},
+        result_count: result.synced,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+      });
+
+      return buildToolResult(result as unknown as ToolPayload);
+    },
+  );
+
   // ── enterprise.status ──
   server.registerTool(
     "enterprise.status",
@@ -139,9 +246,12 @@ export function registerEnterpriseTools(
       inputSchema: z.object({}),
     },
     async () => {
+      const lastSyncResult = getLastSync();
+      const policies = policyStore.getMergedPolicies();
+
       return buildToolResult({
         edition: "enterprise",
-        version: "0.1.0",
+        version: "0.3.0",
         license: {
           valid: license.valid,
           customer: license.customer,
@@ -151,8 +261,15 @@ export function registerEnterpriseTools(
         },
         features: {
           telemetry: config.telemetry.enabled ? "active" : "disabled",
-          policy_sync: "not_configured",
+          policy_sync: config.policy.enabled ? "active" : "disabled",
           audit_log: config.audit.enabled ? "active" : "disabled",
+          rbac: config.rbac.enabled ? `active (role: ${role})` : "disabled",
+        },
+        policies: {
+          total: policies.length,
+          org: policies.filter(p => p.source === "org").length,
+          local: policies.filter(p => p.source === "local").length,
+          last_sync: lastSyncResult,
         },
       });
     },

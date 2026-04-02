@@ -6,10 +6,12 @@ import { deployBundledModel } from "./model/deploy.js";
 import { TelemetryCollector } from "./telemetry/collector.js";
 import { pushMetrics } from "./telemetry/sync.js";
 import { AuditWriter } from "./audit/writer.js";
+import { PolicyStore } from "./policy/store.js";
+import { syncFromCloud, syncFromLocal } from "./policy/sync.js";
 import { registerEnterpriseTools } from "./tools/enterprise.js";
 
 export const name = "cortex-enterprise";
-export const version = "0.2.0";
+export const version = "0.3.0";
 
 export async function register(server: McpServer): Promise<void> {
   const projectRoot = process.env.CORTEX_PROJECT_ROOT?.trim() || process.cwd();
@@ -24,14 +26,27 @@ export async function register(server: McpServer): Promise<void> {
   const license = loadLicense(contextDir);
   const config = loadEnterpriseConfig(contextDir);
 
-  // Initialize telemetry collector
+  // Initialize subsystems
   const collector = new TelemetryCollector(contextDir);
-
-  // Initialize audit writer if enabled
   const auditWriter = config.audit.enabled ? new AuditWriter(contextDir) : null;
+  const policyStore = new PolicyStore(contextDir);
+
+  // Initial policy sync
+  if (config.policy.enabled) {
+    if (config.policy.endpoint && config.policy.api_key) {
+      await syncFromCloud(config.policy.endpoint, config.policy.api_key, policyStore);
+      process.stderr.write(`[cortex-enterprise] Policy sync: cloud\n`);
+    } else {
+      syncFromLocal(policyStore);
+      const orgCount = policyStore.loadOrgPolicies().length;
+      if (orgCount > 0) {
+        process.stderr.write(`[cortex-enterprise] Policy sync: ${orgCount} org rules loaded\n`);
+      }
+    }
+  }
 
   if (license.valid) {
-    registerEnterpriseTools(server, license, collector, auditWriter, config, contextDir);
+    registerEnterpriseTools(server, license, collector, auditWriter, config, contextDir, policyStore);
     process.stderr.write(`[cortex-enterprise] v${version} — licensed to: ${license.customer}\n`);
   } else {
     process.stderr.write(`[cortex-enterprise] License invalid: ${license.error}\n`);
@@ -42,11 +57,13 @@ export async function register(server: McpServer): Promise<void> {
   }
 
   // Log active features
-  if (config.telemetry.enabled) {
-    process.stderr.write(`[cortex-enterprise] Telemetry: active (push every ${config.telemetry.interval_minutes}m)\n`);
-  }
-  if (config.audit.enabled) {
-    process.stderr.write(`[cortex-enterprise] Audit log: active (retention ${config.audit.retention_days}d)\n`);
+  const features: string[] = [];
+  if (config.telemetry.enabled) features.push("telemetry");
+  if (config.audit.enabled) features.push("audit");
+  if (config.policy.enabled) features.push("policy");
+  if (config.rbac.enabled) features.push(`rbac(${config.rbac.default_role})`);
+  if (features.length > 0) {
+    process.stderr.write(`[cortex-enterprise] Active: ${features.join(", ")}\n`);
   }
 
   // Schedule telemetry flush + push
@@ -58,7 +75,16 @@ export async function register(server: McpServer): Promise<void> {
         await pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key);
       }
     }, intervalMs);
-    timer.unref(); // don't block process exit
+    timer.unref();
+  }
+
+  // Schedule policy sync
+  if (config.policy.enabled && config.policy.endpoint && config.policy.api_key) {
+    const intervalMs = config.policy.sync_interval_minutes * 60000;
+    const timer = setInterval(async () => {
+      await syncFromCloud(config.policy.endpoint, config.policy.api_key, policyStore);
+    }, intervalMs);
+    timer.unref();
   }
 
   // Flush telemetry on exit
