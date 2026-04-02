@@ -17,7 +17,7 @@
     "dev": "tsc -p tsconfig.json --watch"
   },
   "dependencies": {
-    "@danielblomma/cortex-core": "0.1.0",
+    "@danielblomma/cortex-core": "*",
     "zod": "^3.25.76"
   },
   "peerDependencies": {

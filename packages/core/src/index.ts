@@ -1,6 +1,6 @@
 // Config
 export { loadEnterpriseConfig } from "./config.js";
-export type { TelemetryConfig, AuditConfig, PolicyConfig, RBACConfig, EnterpriseConfig } from "./config.js";
+export type { TelemetryConfig, AuditConfig, PolicyConfig, EnterpriseConfig } from "./config.js";
 
 // License
 export { loadLicense } from "./license/check.js";
@@ -19,7 +19,7 @@ export type { AuditQuery } from "./audit/query.js";
 
 // RBAC
 export { checkAccess, getAccessDeniedMessage } from "./rbac/check.js";
-export type { Role } from "./rbac/check.js";
+export type { Role, RBACConfig } from "./rbac/check.js";
 
 // Policy
 export { PolicyStore } from "./policy/store.js";

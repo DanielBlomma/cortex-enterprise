@@ -528,12 +528,12 @@ async function main(): Promise<void> {
 
   fs.writeFileSync(EMBEDDINGS_MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
-  console.log(`[embed] mode=${mode} model=${modelId} dim=${dimensions}`);
-  console.log(
-    `[embed] entities=${entities.length} embedded=${embedded} reused=${reused} failed=${failed}`
+  process.stderr.write(`[embed] mode=${mode} model=${modelId} dim=${dimensions}\n`);
+  process.stderr.write(
+    `[embed] entities=${entities.length} embedded=${embedded} reused=${reused} failed=${failed}\n`
   );
-  console.log(`[embed] wrote ${EMBEDDINGS_PATH}`);
-  console.log(`[embed] manifest ${EMBEDDINGS_MANIFEST_PATH}`);
+  process.stderr.write(`[embed] wrote ${EMBEDDINGS_PATH}\n`);
+  process.stderr.write(`[embed] manifest ${EMBEDDINGS_MANIFEST_PATH}\n`);
 }
 
 main().catch((error) => {

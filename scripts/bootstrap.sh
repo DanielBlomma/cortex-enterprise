@@ -33,9 +33,9 @@ info "pipeline: deps -> ingest -> embeddings -> graph -> status"
 
 mkdir -p "$MCP_DIR/.npm-cache"
 
-step "Installing MCP dependencies"
+step "Installing dependencies"
 info "note: upstream RyuGraph dependencies may print deprecation warnings during install"
-NPM_CONFIG_CACHE="$MCP_DIR/.npm-cache" npm --prefix "$MCP_DIR" install --no-fund --no-update-notifier --loglevel=warn
+npm install --no-fund --no-update-notifier --loglevel=warn
 NPM_CONFIG_CACHE="$REPO_ROOT/scripts/parsers/.npm-cache" npm --prefix "$REPO_ROOT/scripts/parsers" install --no-fund --no-update-notifier --loglevel=warn
 
 step "Indexing repository context"

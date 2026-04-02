@@ -429,8 +429,8 @@ function warnIfOptionalFilesMissing(): void {
     return;
   }
 
-  console.warn(
-    `[graph-load] warning: missing optional files (${missing.join(", ")}); continuing without those nodes/relations`
+  process.stderr.write(
+    `[graph-load] warning: missing optional files (${missing.join(", ")}); continuing without those nodes/relations\n`
   );
 }
 
@@ -831,20 +831,20 @@ async function main(): Promise<void> {
   const summaryPath = path.join(CACHE_DIR, "graph-manifest.json");
   fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
 
-  console.log(`[graph-load] db_path=${DB_PATH}`);
-  console.log(
-    `[graph-load] files=${summary.counts.files} rules=${summary.counts.rules} adrs=${summary.counts.adrs} chunks=${summary.counts.chunks} modules=${summary.counts.modules} projects=${summary.counts.projects}`
+  process.stderr.write(`[graph-load] db_path=${DB_PATH}\n`);
+  process.stderr.write(
+    `[graph-load] files=${summary.counts.files} rules=${summary.counts.rules} adrs=${summary.counts.adrs} chunks=${summary.counts.chunks} modules=${summary.counts.modules} projects=${summary.counts.projects}\n`
   );
-  console.log(
-    `[graph-load] rels constrains=${summary.counts.constrains} implements=${summary.counts.implements} supersedes=${summary.counts.supersedes}`
+  process.stderr.write(
+    `[graph-load] rels constrains=${summary.counts.constrains} implements=${summary.counts.implements} supersedes=${summary.counts.supersedes}\n`
   );
-  console.log(
-    `[graph-load] rels defines=${summary.counts.defines} calls=${summary.counts.calls} imports=${summary.counts.imports} calls_sql=${summary.counts.calls_sql} uses_config_key=${summary.counts.uses_config_key} uses_resource_key=${summary.counts.uses_resource_key} uses_setting_key=${summary.counts.uses_setting_key}`
+  process.stderr.write(
+    `[graph-load] rels defines=${summary.counts.defines} calls=${summary.counts.calls} imports=${summary.counts.imports} calls_sql=${summary.counts.calls_sql} uses_config_key=${summary.counts.uses_config_key} uses_resource_key=${summary.counts.uses_resource_key} uses_setting_key=${summary.counts.uses_setting_key}\n`
   );
-  console.log(
-    `[graph-load] rels contains=${summary.counts.contains} contains_module=${summary.counts.contains_module} exports=${summary.counts.exports} includes_file=${summary.counts.includes_file} references_project=${summary.counts.references_project} uses_resource=${summary.counts.uses_resource} uses_setting=${summary.counts.uses_setting} uses_config=${summary.counts.uses_config} transforms_config=${summary.counts.transforms_config}`
+  process.stderr.write(
+    `[graph-load] rels contains=${summary.counts.contains} contains_module=${summary.counts.contains_module} exports=${summary.counts.exports} includes_file=${summary.counts.includes_file} references_project=${summary.counts.references_project} uses_resource=${summary.counts.uses_resource} uses_setting=${summary.counts.uses_setting} uses_config=${summary.counts.uses_config} transforms_config=${summary.counts.transforms_config}\n`
   );
-  console.log(`[graph-load] manifest=${summaryPath}`);
+  process.stderr.write(`[graph-load] manifest=${summaryPath}\n`);
 
   // RyuGraph Node addon can crash on explicit close in some environments.
   // Let process teardown handle resource cleanup.

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { env, pipeline } from "@xenova/transformers";
 import { PATHS } from "./paths.js";
+import { readJsonl, asString } from "./jsonl.js";
 import type { EmbeddingIndex, JsonObject } from "./types.js";
 
 const EMBEDDING_INIT_RETRY_INTERVAL_MS = 5000;
@@ -11,30 +12,6 @@ let embeddingExtractorModel: string | null = null;
 let embeddingExtractorPromise: Promise<unknown | null> | null = null;
 let embeddingLastInitAttemptAt = 0;
 let embeddingRuntimeWarning: string | null = null;
-
-function asString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function readJsonl(filePath: string): JsonObject[] {
-  if (!fs.existsSync(filePath)) {
-    return [];
-  }
-
-  const raw = fs.readFileSync(filePath, "utf8");
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line) as JsonObject;
-      } catch {
-        return null;
-      }
-    })
-    .filter((value): value is JsonObject => value !== null);
-}
 
 function toVector(output: unknown): number[] | null {
   if (!output || typeof output !== "object") {

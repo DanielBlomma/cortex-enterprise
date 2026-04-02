@@ -15,7 +15,7 @@ const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
 });
 
 writeFileSync(join(keysDir, "public.pem"), publicKey);
-writeFileSync(join(keysDir, "private.pem"), privateKey);
+writeFileSync(join(keysDir, "private.pem"), privateKey, { mode: 0o600 });
 
 console.log("Key pair generated:");
 console.log(`  Public:  packages/cloud/keys/public.pem`);

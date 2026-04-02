@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createRequire } from "node:module";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadEnterpriseConfig } from "@danielblomma/cortex-core/config";
 import { loadLicense } from "@danielblomma/cortex-core/license/check";
@@ -10,8 +11,18 @@ import { PolicyStore } from "@danielblomma/cortex-core/policy/store";
 import { syncFromCloud, syncFromLocal } from "./policy/sync.js";
 import { registerEnterpriseTools } from "./tools/enterprise.js";
 
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
+
 export const name = "cortex-enterprise";
-export const version = "0.3.0";
+export const version: string = pkg.version;
+
+const timers: NodeJS.Timeout[] = [];
+
+export function shutdown(): void {
+  for (const t of timers) clearInterval(t);
+  timers.length = 0;
+}
 
 export async function register(server: McpServer): Promise<void> {
   const projectRoot = process.env.CORTEX_PROJECT_ROOT?.trim() || process.cwd();
@@ -80,6 +91,7 @@ export async function register(server: McpServer): Promise<void> {
       }
     }, intervalMs);
     timer.unref();
+    timers.push(timer);
   }
 
   // Schedule policy sync
@@ -93,8 +105,15 @@ export async function register(server: McpServer): Promise<void> {
       }
     }, intervalMs);
     timer.unref();
+    timers.push(timer);
   }
 
   // Flush telemetry on exit
-  process.on("beforeExit", () => collector.flush());
+  const cleanup = () => {
+    shutdown();
+    collector.flush();
+  };
+  process.on("beforeExit", cleanup);
+  process.once("SIGTERM", cleanup);
+  process.once("SIGINT", cleanup);
 }

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Role, RBACConfig } from "./rbac/check.js";
 
 export type TelemetryConfig = {
   enabled: boolean;
@@ -18,11 +19,6 @@ export type PolicyConfig = {
   endpoint: string;
   api_key: string;
   sync_interval_minutes: number;
-};
-
-export type RBACConfig = {
-  enabled: boolean;
-  default_role: string;
 };
 
 export type EnterpriseConfig = {
@@ -54,6 +50,12 @@ const DEFAULTS: EnterpriseConfig = {
     default_role: "developer",
   },
 };
+
+const VALID_ROLES: Role[] = ["admin", "developer", "readonly"];
+
+function isValidRole(value: string | undefined): value is Role {
+  return VALID_ROLES.includes(value as Role);
+}
 
 function parseSimpleYaml(text: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -116,7 +118,7 @@ export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
     },
     rbac: {
       enabled: fields["rbac.enabled"] === "true",
-      default_role: fields["rbac.default_role"] ?? DEFAULTS.rbac.default_role,
+      default_role: isValidRole(fields["rbac.default_role"]) ? fields["rbac.default_role"] : DEFAULTS.rbac.default_role,
     },
   };
 }

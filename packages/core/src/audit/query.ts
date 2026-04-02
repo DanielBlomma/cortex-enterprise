@@ -9,9 +9,14 @@ export type AuditQuery = {
   limit?: number;
 };
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export function queryAuditLog(contextDir: string, query: AuditQuery): AuditEntry[] {
   const auditDir = join(contextDir, "audit");
   const limit = query.limit ?? 50;
+
+  if (query.from && !DATE_RE.test(query.from)) return [];
+  if (query.to && !DATE_RE.test(query.to)) return [];
 
   let files: string[];
   try {

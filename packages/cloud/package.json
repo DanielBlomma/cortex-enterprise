@@ -11,7 +11,7 @@
     "dev": "tsc -p tsconfig.json --watch"
   },
   "dependencies": {
-    "@danielblomma/cortex-core": "0.1.0"
+    "@danielblomma/cortex-core": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
