@@ -5,8 +5,11 @@ import type { EnterpriseConfig } from "@danielblomma/cortex-core/config";
 import type { TelemetryCollector } from "@danielblomma/cortex-core/telemetry/collector";
 import type { AuditWriter } from "@danielblomma/cortex-core/audit/writer";
 import type { PolicyStore } from "@danielblomma/cortex-core/policy/store";
+import { enforceInjectionPolicy, buildViolationPayload } from "@danielblomma/cortex-core/policy/enforce";
+import type { InjectionMatch } from "@danielblomma/cortex-core/policy/injection";
 import { getLastPush } from "../telemetry/sync.js";
 import { syncFromCloud, syncFromLocal, getLastSync } from "../policy/sync.js";
+import { queueViolation } from "../violations/push.js";
 import { queryAuditLog } from "@danielblomma/cortex-core/audit/query";
 import { checkAccess, getAccessDeniedMessage, type Role } from "@danielblomma/cortex-core/rbac/check";
 
@@ -284,6 +287,68 @@ export function registerEnterpriseTools(
           local: policies.filter(p => p.source === "local").length,
           last_sync: lastSyncResult,
         },
+      });
+    },
+  );
+
+  // ── security.scan ──
+  server.registerTool(
+    "security.scan",
+    {
+      description:
+        "Scan text for prompt injection attempts. Returns a risk score and matched patterns. " +
+        "Only active when the prompt-injection-defense policy is enforced.",
+      inputSchema: z.object({
+        text: z.string().min(1).max(50_000).describe("Text to scan for prompt injection"),
+        file_path: z.string().max(500).optional().describe("Source file path (for violation reporting)"),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "policy.list")) {
+        return accessDenied(role, "security.scan");
+      }
+
+      const parsed = z.object({
+        text: z.string().min(1).max(50_000),
+        file_path: z.string().max(500).optional(),
+      }).parse(input ?? {});
+
+      const policies = policyStore.getMergedPolicies();
+      const result = enforceInjectionPolicy(parsed.text, policies, { sanitize: true });
+
+      // Queue violation for push to cortex-web
+      if (!result.allowed && result.scan.matches.length > 0) {
+        const violation = buildViolationPayload(result.scan.matches, {
+          filePath: parsed.file_path,
+        });
+        queueViolation(violation);
+      }
+
+      const rulesApplied = result.allowed ? [] : [result.ruleId];
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "security.scan",
+        input: { text_length: parsed.text.length, file_path: parsed.file_path },
+        result_count: result.scan.matches.length,
+        entities_returned: [],
+        rules_applied: rulesApplied,
+        duration_ms: 0,
+      });
+
+      return buildToolResult({
+        flagged: result.scan.flagged,
+        score: result.scan.score,
+        allowed: result.allowed,
+        policy_active: !result.allowed || result.scan.score > 0 ? true : policies.some(p => p.id === "prompt-injection-defense" && p.enforce),
+        matches: result.scan.matches.map((m: InjectionMatch) => ({
+          pattern: m.pattern,
+          category: m.category,
+          matched: m.matched,
+          position: m.position,
+          weight: m.weight,
+        })),
+        sanitized: result.sanitized ?? null,
       });
     },
   );

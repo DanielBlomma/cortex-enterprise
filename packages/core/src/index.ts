@@ -24,3 +24,9 @@ export type { Role, RBACConfig } from "./rbac/check.js";
 // Policy
 export { PolicyStore } from "./policy/store.js";
 export type { OrgPolicy } from "./policy/store.js";
+
+// Prompt injection
+export { scanForInjection, sanitizeContent } from "./policy/injection.js";
+export type { ScanResult, InjectionMatch, InjectionCategory } from "./policy/injection.js";
+export { enforceInjectionPolicy, isInjectionDefenseActive, buildViolationPayload } from "./policy/enforce.js";
+export type { EnforcementResult } from "./policy/enforce.js";
