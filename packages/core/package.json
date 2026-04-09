@@ -41,6 +41,14 @@
     "./policy/store": {
       "types": "./dist/policy/store.d.ts",
       "import": "./dist/policy/store.js"
+    },
+    "./policy/injection": {
+      "types": "./dist/policy/injection.d.ts",
+      "import": "./dist/policy/injection.js"
+    },
+    "./policy/enforce": {
+      "types": "./dist/policy/enforce.d.ts",
+      "import": "./dist/policy/enforce.js"
     }
   },
   "files": ["dist"],
@@ -55,7 +63,7 @@
     "typescript": "^5.7.2"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "repository": {
     "type": "git",
