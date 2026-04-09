@@ -1,6 +1,6 @@
 {
   "name": "@danielblomma/cortex-enterprise",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Enterprise plugin for Cortex MCP — adds licensing, telemetry, policy sync and enterprise tools.",
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "models"],
+  "bin": {
+    "cortex": "bin/cortex.mjs"
+  },
+  "files": ["dist", "models", "bin"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
