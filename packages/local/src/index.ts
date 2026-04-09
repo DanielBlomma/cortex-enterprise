@@ -10,6 +10,7 @@ import { AuditWriter } from "@danielblomma/cortex-core/audit/writer";
 import { PolicyStore } from "@danielblomma/cortex-core/policy/store";
 import { syncFromCloud, syncFromLocal } from "./policy/sync.js";
 import { registerEnterpriseTools } from "./tools/enterprise.js";
+import { pushViolations } from "./violations/push.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -18,10 +19,19 @@ export const name = "cortex-enterprise";
 export const version: string = pkg.version;
 
 const timers: NodeJS.Timeout[] = [];
+let activeCollector: TelemetryCollector | null = null;
 
 export function shutdown(): void {
   for (const t of timers) clearInterval(t);
   timers.length = 0;
+}
+
+/**
+ * Telemetry hook called by cortex core after each tool execution.
+ * Wired up via the CortexPlugin.onToolCall interface.
+ */
+export function onToolCall(toolName: string, resultCount: number, tokensSaved: number): void {
+  activeCollector?.record(toolName, resultCount, tokensSaved);
 }
 
 export async function register(server: McpServer): Promise<void> {
@@ -38,7 +48,8 @@ export async function register(server: McpServer): Promise<void> {
   const config = loadEnterpriseConfig(contextDir);
 
   // Initialize subsystems
-  const collector = new TelemetryCollector(contextDir);
+  const collector = new TelemetryCollector(contextDir, version);
+  activeCollector = collector;
   const auditWriter = config.audit.enabled ? new AuditWriter(contextDir) : null;
   const policyStore = new PolicyStore(contextDir);
 
@@ -85,6 +96,10 @@ export async function register(server: McpServer): Promise<void> {
         collector.flush();
         if (config.telemetry.endpoint) {
           await pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key);
+        }
+        // Push queued violations alongside telemetry
+        if (config.policy.endpoint && config.policy.api_key) {
+          await pushViolations(config.policy.endpoint, config.policy.api_key);
         }
       } catch (err) {
         process.stderr.write(`[cortex-enterprise] Telemetry flush error: ${err}\n`);

@@ -99,13 +99,15 @@ function parseSimpleYaml(text: string): Record<string, string> {
 }
 
 export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
-  const configPath = join(contextDir, "enterprise.yaml");
-
   let raw: string;
   try {
-    raw = readFileSync(configPath, "utf8");
+    raw = readFileSync(join(contextDir, "enterprise.yml"), "utf8");
   } catch {
-    return DEFAULTS;
+    try {
+      raw = readFileSync(join(contextDir, "enterprise.yaml"), "utf8");
+    } catch {
+      return DEFAULTS;
+    }
   }
 
   const fields = parseSimpleYaml(raw);
