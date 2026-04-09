@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@danielblomma/cortex-core": "*",
+    "@danielblomma/cortex-mcp": ">=1.0.0",
     "zod": "^3.25.76"
   },
   "peerDependencies": {
