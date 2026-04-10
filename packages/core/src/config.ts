@@ -114,9 +114,11 @@ export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
 
   return {
     telemetry: {
-      enabled: fields["telemetry.enabled"] === "true",
       endpoint: fields["telemetry.endpoint"] ?? DEFAULTS.telemetry.endpoint,
       api_key: fields["telemetry.api_key"] ?? DEFAULTS.telemetry.api_key,
+      enabled: fields["telemetry.enabled"] !== undefined
+        ? fields["telemetry.enabled"] === "true"
+        : !!(fields["telemetry.endpoint"] && fields["telemetry.api_key"]),
       interval_minutes: parseInt(fields["telemetry.interval_minutes"] ?? "", 10) || DEFAULTS.telemetry.interval_minutes,
     },
     audit: {
