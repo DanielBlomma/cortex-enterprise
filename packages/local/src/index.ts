@@ -90,6 +90,11 @@ export async function register(server: McpServer): Promise<void> {
 
   // Schedule telemetry flush + push
   if (config.telemetry.enabled) {
+    // Push any accumulated metrics from previous sessions on startup
+    if (config.telemetry.endpoint) {
+      pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key).catch(() => {});
+    }
+
     const intervalMs = config.telemetry.interval_minutes * 60000;
     const timer = setInterval(async () => {
       try {
@@ -123,10 +128,13 @@ export async function register(server: McpServer): Promise<void> {
     timers.push(timer);
   }
 
-  // Flush telemetry on exit
+  // Flush + push telemetry on exit
   const cleanup = () => {
     shutdown();
     collector.flush();
+    if (config.telemetry.enabled && config.telemetry.endpoint) {
+      pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key).catch(() => {});
+    }
   };
   process.on("beforeExit", cleanup);
   process.once("SIGTERM", cleanup);
