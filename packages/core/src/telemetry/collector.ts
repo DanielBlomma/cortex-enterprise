@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { hostname, platform, arch } from "node:os";
 import { join } from "node:path";
@@ -24,12 +24,16 @@ const AVG_TOKENS_PER_RESULT = 400;
 
 function generateInstanceId(contextDir: string): string {
   const idPath = join(contextDir, "telemetry", "machine_id");
-  try {
-    const existing = readFileSync(idPath, "utf8").trim();
-    if (existing.length > 0) return existing;
-  } catch (err) {
-    process.stderr.write(`[cortex-enterprise] Could not read instance id: ${err instanceof Error ? err.message : String(err)}\n`);
+  if (existsSync(idPath)) {
+    try {
+      const existing = readFileSync(idPath, "utf8").trim();
+      if (existing.length > 0) return existing;
+    } catch (err) {
+      process.stderr.write(`[cortex-enterprise] machine_id exists but is unreadable: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
+  // Note: hostname|platform|arch may collide on machines with identical defaults.
+  // Consider adding a random salt if fleet-wide uniqueness is critical.
   const fingerprint = `${hostname()}|${platform()}|${arch()}`;
   const id = createHash("sha256").update(fingerprint).digest("hex").slice(0, 16);
   try {
