@@ -27,16 +27,16 @@ function generateInstanceId(contextDir: string): string {
   try {
     const existing = readFileSync(idPath, "utf8").trim();
     if (existing.length > 0) return existing;
-  } catch {
-    // Generate new
+  } catch (err) {
+    process.stderr.write(`[cortex-enterprise] Could not read instance id: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const fingerprint = `${hostname()}|${platform()}|${arch()}`;
   const id = createHash("sha256").update(fingerprint).digest("hex").slice(0, 16);
   try {
     mkdirSync(join(contextDir, "telemetry"), { recursive: true });
     writeFileSync(idPath, id, "utf8");
-  } catch {
-    // Best effort
+  } catch (err) {
+    process.stderr.write(`[cortex-enterprise] Could not persist instance id: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return id;
 }
