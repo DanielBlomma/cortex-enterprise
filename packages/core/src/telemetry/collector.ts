@@ -1,4 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { hostname, platform, arch } from "node:os";
 import { join } from "node:path";
 
 export type TelemetryMetrics = {
@@ -15,11 +17,35 @@ export type TelemetryMetrics = {
   estimated_tokens_saved: number;
   estimated_tokens_total: number;
   client_version: string;
+  instance_id: string;
 };
 
 const AVG_TOKENS_PER_RESULT = 400;
 
-function emptyMetrics(clientVersion: string): TelemetryMetrics {
+function generateInstanceId(contextDir: string): string {
+  const idPath = join(contextDir, "telemetry", "machine_id");
+  if (existsSync(idPath)) {
+    try {
+      const existing = readFileSync(idPath, "utf8").trim();
+      if (existing.length > 0) return existing;
+    } catch (err) {
+      process.stderr.write(`[cortex-enterprise] machine_id exists but is unreadable: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
+  // Note: hostname|platform|arch may collide on machines with identical defaults.
+  // Consider adding a random salt if fleet-wide uniqueness is critical.
+  const fingerprint = `${hostname()}|${platform()}|${arch()}`;
+  const id = createHash("sha256").update(fingerprint).digest("hex").slice(0, 16);
+  try {
+    mkdirSync(join(contextDir, "telemetry"), { recursive: true });
+    writeFileSync(idPath, id, "utf8");
+  } catch (err) {
+    process.stderr.write(`[cortex-enterprise] Could not persist instance id: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+  return id;
+}
+
+function emptyMetrics(clientVersion: string, instanceId: string): TelemetryMetrics {
   const now = new Date().toISOString();
   return {
     period_start: now,
@@ -35,6 +61,7 @@ function emptyMetrics(clientVersion: string): TelemetryMetrics {
     estimated_tokens_saved: 0,
     estimated_tokens_total: 0,
     client_version: clientVersion,
+    instance_id: instanceId,
   };
 }
 
@@ -42,10 +69,12 @@ export class TelemetryCollector {
   private metrics: TelemetryMetrics;
   private readonly metricsPath: string;
   private readonly clientVersion: string;
+  private readonly instanceId: string;
   private dirty = false;
 
   constructor(contextDir: string, clientVersion = "unknown") {
     this.clientVersion = clientVersion;
+    this.instanceId = generateInstanceId(contextDir);
     const telemetryDir = join(contextDir, "telemetry");
     this.metricsPath = join(telemetryDir, "metrics.json");
 
@@ -53,10 +82,10 @@ export class TelemetryCollector {
     try {
       const raw = readFileSync(this.metricsPath, "utf8");
       this.metrics = JSON.parse(raw);
-      // Ensure client_version is current
       this.metrics.client_version = clientVersion;
+      this.metrics.instance_id = this.instanceId;
     } catch {
-      this.metrics = emptyMetrics(clientVersion);
+      this.metrics = emptyMetrics(clientVersion, this.instanceId);
     }
   }
 
@@ -110,7 +139,7 @@ export class TelemetryCollector {
   }
 
   reset(): void {
-    this.metrics = emptyMetrics(this.clientVersion);
+    this.metrics = emptyMetrics(this.clientVersion, this.instanceId);
     this.dirty = true;
   }
 }
