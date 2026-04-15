@@ -33,7 +33,7 @@ const DEFAULTS: EnterpriseConfig = {
     enabled: false,
     endpoint: "",
     api_key: "",
-    interval_minutes: 60,
+    interval_minutes: 10,
   },
   audit: {
     enabled: true,

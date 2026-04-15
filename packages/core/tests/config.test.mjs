@@ -19,7 +19,7 @@ test("returns defaults when config file is missing", () => {
 
   assert.equal(config.telemetry.enabled, false);
   assert.equal(config.telemetry.endpoint, "");
-  assert.equal(config.telemetry.interval_minutes, 60);
+  assert.equal(config.telemetry.interval_minutes, 10);
   assert.equal(config.audit.enabled, true);
   assert.equal(config.audit.retention_days, 90);
   assert.equal(config.policy.enabled, true);
@@ -85,7 +85,7 @@ audit:
 `;
   const dir = makeTempContext(yaml);
   const config = loadEnterpriseConfig(dir);
-  assert.equal(config.telemetry.interval_minutes, 60);
+  assert.equal(config.telemetry.interval_minutes, 10);
   assert.equal(config.audit.retention_days, 90);
 });
 

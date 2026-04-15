@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createRequire } from "node:module";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { loadEnterpriseConfig } from "@danielblomma/cortex-core/config";
+import { loadEnterpriseConfig, type EnterpriseConfig } from "@danielblomma/cortex-core/config";
 import { loadLicense } from "@danielblomma/cortex-core/license/check";
 import { deployBundledModel } from "./model/deploy.js";
 import { TelemetryCollector } from "@danielblomma/cortex-core/telemetry/collector";
@@ -20,6 +20,7 @@ export const version: string = pkg.version;
 
 const timers: NodeJS.Timeout[] = [];
 let activeCollector: TelemetryCollector | null = null;
+let activeConfig: EnterpriseConfig | null = null;
 
 export function shutdown(): void {
   for (const t of timers) clearInterval(t);
@@ -34,6 +35,30 @@ export function onToolCall(toolName: string, resultCount: number, tokensSaved: n
   activeCollector?.record(toolName, resultCount, tokensSaved);
 }
 
+/**
+ * Session-end hook called by cortex core on shutdown.
+ * Awaited with a timeout — this is the reliable telemetry push path.
+ */
+export async function onSessionEnd(): Promise<void> {
+  if (!activeCollector || !activeConfig) return;
+  const config = activeConfig;
+  if (!config.telemetry.enabled || !config.telemetry.endpoint) return;
+
+  activeCollector.flush();
+  try {
+    const result = await pushMetrics(
+      activeCollector.getMetrics(),
+      config.telemetry.endpoint,
+      config.telemetry.api_key,
+    );
+    if (!result.success) {
+      process.stderr.write(`[cortex-enterprise] Shutdown telemetry push failed: ${result.error}\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`[cortex-enterprise] Shutdown telemetry push error: ${err}\n`);
+  }
+}
+
 export async function register(server: McpServer): Promise<void> {
   const projectRoot = process.env.CORTEX_PROJECT_ROOT?.trim() || process.cwd();
   const contextDir = path.join(projectRoot, ".context");
@@ -46,6 +71,7 @@ export async function register(server: McpServer): Promise<void> {
 
   const license = loadLicense(contextDir);
   const config = loadEnterpriseConfig(contextDir);
+  activeConfig = config;
 
   // Initialize subsystems
   const collector = new TelemetryCollector(contextDir, version);
@@ -92,7 +118,9 @@ export async function register(server: McpServer): Promise<void> {
   if (config.telemetry.enabled) {
     // Push any accumulated metrics from previous sessions on startup
     if (config.telemetry.endpoint) {
-      pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key).catch(() => {});
+      pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key)
+        .then((r) => { if (!r.success) process.stderr.write(`[cortex-enterprise] Startup telemetry push failed: ${r.error}\n`); })
+        .catch((err) => { process.stderr.write(`[cortex-enterprise] Startup telemetry push error: ${err}\n`); });
     }
 
     const intervalMs = config.telemetry.interval_minutes * 60000;
@@ -128,15 +156,4 @@ export async function register(server: McpServer): Promise<void> {
     timers.push(timer);
   }
 
-  // Flush + push telemetry on exit
-  const cleanup = () => {
-    shutdown();
-    collector.flush();
-    if (config.telemetry.enabled && config.telemetry.endpoint) {
-      pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key).catch(() => {});
-    }
-  };
-  process.on("beforeExit", cleanup);
-  process.once("SIGTERM", cleanup);
-  process.once("SIGINT", cleanup);
 }
