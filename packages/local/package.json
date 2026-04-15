@@ -1,7 +1,7 @@
 {
   "name": "@danielblomma/cortex-enterprise",
-  "version": "0.5.1",
-  "description": "Enterprise plugin for Cortex MCP — adds licensing, telemetry, policy sync and enterprise tools.",
+  "version": "0.5.2",
+  "description": "Enterprise plugin for Cortex MCP — adds telemetry, policy sync, audit and enterprise tools.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

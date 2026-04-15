@@ -6,17 +6,17 @@ Cortex has two parts: a free, open-source core and a paid enterprise add-on.
 
 The **core** (free, open-source) does the heavy lifting: it reads your code, builds an index, runs searches, and talks to AI coding assistants. Every developer gets this for free.
 
-The **enterprise add-on** (paid, private) layers on top. It adds licensing, rules enforcement, usage tracking, audit logging, and role-based access. It plugs into the core automatically — if it's installed, the extra features just appear. If it's not installed, the core works exactly the same as before.
+The **enterprise add-on** (paid, private) layers on top. It adds rules enforcement, usage tracking, audit logging, and role-based access. It plugs into the core automatically — if it's installed, the extra features just appear. If it's not installed, the core works exactly the same as before.
 
 ```
 Free core (public)              Enterprise add-on (paid)
 +------------------------+      +---------------------------+
 |                        |      |                           |
-|  Reads your code       |      |  License validation       |
-|  Builds the index      |<-----+  Organization rules       |
-|  Runs searches         |      |  Usage tracking           |
-|  Talks to AI tools     |      |  Audit logging            |
-|  Shows the dashboard   |      |  Access control (roles)   |
+|  Reads your code       |      |  Organization rules       |
+|  Builds the index      |<-----+  Usage tracking           |
+|  Runs searches         |      |  Audit logging            |
+|  Talks to AI tools     |      |  Access control (roles)   |
+|  Shows the dashboard   |      |  Enterprise tools         |
 |                        |      |                           |
 +------------------------+      +---------------------------+
 
@@ -35,7 +35,7 @@ add-on is there.             fixes both editions.
 1. The core starts up and does everything it normally does — indexing, search, connecting to AI tools.
 
 2. It then checks: "Is the enterprise add-on installed?"
-   - **If yes:** The add-on activates. It checks the license, loads organization rules, starts the audit log, and adds enterprise tools. The dashboard shows **[Enterprise]**.
+   - **If yes:** The add-on activates. It loads organization rules, starts the audit log, and adds enterprise tools. The dashboard shows **[Enterprise]**.
    - **If no:** Nothing happens. The core runs in community mode. The dashboard shows **[Community]**.
 
 This is seamless. The developer doesn't need to configure anything differently. Enterprise features just appear when the add-on is installed.
@@ -46,12 +46,11 @@ This is seamless. The developer doesn't need to configure anything differently. 
 
 | Part | What it does |
 |---|---|
-| **License validation** | Checks that the organization has a valid license. Uses a signed license file that works offline — no license server needed. |
 | **Usage tracking** | Counts how often Cortex is used and estimates token savings. Connected edition sends these numbers (never code) to the cloud dashboard. Air-gapped edition keeps them local. |
 | **Organization rules** | Loads rules that control what AI assistants can see. Connected edition pulls rules from the cloud. Air-gapped edition reads them from local files. |
 | **Audit logging** | Records every interaction: what the AI asked, what it received, which rules applied. Stored as daily log files. |
 | **Access control** | Defines who can do what: admins manage rules, developers use the tools, read-only users view dashboards. |
-| **Enterprise tools** | Adds management commands: check license status, sync rules, query audit logs, view system health. |
+| **Enterprise tools** | Adds management commands: check telemetry status, sync rules, query audit logs, view system health. |
 
 ---
 

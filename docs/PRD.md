@@ -88,32 +88,13 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 
 | ID | Feature | Priority | Description |
 |---|---|---|---|
-| EA-01 | Offline License Validation | P0 | Signed `.lic` file verified with embedded public key, no phone-home |
-| EA-02 | Bundled Embedding Model | P0 | Embedding model shipped inside the package, no HuggingFace download |
-| EA-03 | Local Policy Files | P0 | Rules distributed as files (git, USB, internal portal), not via API |
-| EA-04 | Tarball Distribution | P0 | `.tgz` package installable without npm registry access |
-| EA-05 | Docker Image | P1 | Pre-built Docker image with all dependencies for air-gapped install |
-| EA-06 | Local Audit Log | P1 | Audit log written to local files, exportable for compliance review |
-| EA-07 | License Dashboard | P2 | Local dashboard showing license status, expiry, usage |
-| EA-08 | Offline Update Mechanism | P3 | Delta-update packages for patching without full reinstall |
-
-#### License File Format
-
-```yaml
-# .context/cortex.lic
-customer: "ACME Corp"
-edition: "air-gapped"
-issued: "2026-04-02"
-expires: "2027-04-02"
-max_repos: 50
-features:
-  - audit_log
-  - policy_local
-  - bundled_embeddings
-signature: "<base64-encoded Ed25519 signature>"
-```
-
-Validation: Ed25519 public key embedded in the package verifies the signature. No network call required.
+| EA-01 | Bundled Embedding Model | P0 | Embedding model shipped inside the package, no HuggingFace download |
+| EA-02 | Local Policy Files | P0 | Rules distributed as files (git, USB, internal portal), not via API |
+| EA-03 | Tarball Distribution | P0 | `.tgz` package installable without npm registry access |
+| EA-04 | Docker Image | P1 | Pre-built Docker image with all dependencies for air-gapped install |
+| EA-05 | Local Audit Log | P1 | Audit log written to local files, exportable for compliance review |
+| EA-06 | Local Operations Dashboard | P2 | Local dashboard showing usage, policies, and audit health |
+| EA-07 | Offline Update Mechanism | P3 | Delta-update packages for patching without full reinstall |
 
 ---
 
@@ -129,18 +110,7 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 | FR-04 | Dashboard shows `[Community]` or `[Enterprise]` in header | Done |
 | FR-05 | Type declarations allow enterprise to import core types | Done |
 
-### 4.2 License System
-
-| ID | Requirement | Status |
-|---|---|---|
-| FR-10 | Read `.context/cortex.lic` at startup | Planned |
-| FR-11 | Validate Ed25519 signature using embedded public key | Planned |
-| FR-12 | Check expiry date; warn 30 days before expiry | Planned |
-| FR-13 | Check max_repos limit against active indexed repos | Planned |
-| FR-14 | If license invalid/expired: log warning, disable enterprise tools, fall back to community | Planned |
-| FR-15 | Expose `license.status` MCP tool returning license info | Planned |
-
-### 4.3 Telemetry (Connected Only)
+### 4.2 Telemetry (Connected Only)
 
 | ID | Requirement | Status |
 |---|---|---|
@@ -150,7 +120,7 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 | FR-23 | Never send: source code, embeddings, search queries, file contents | Planned |
 | FR-24 | Expose `telemetry.status` MCP tool showing what is being sent | Planned |
 
-### 4.4 Policy Sync (Connected Only)
+### 4.3 Policy Sync (Connected Only)
 
 | ID | Requirement | Status |
 |---|---|---|
@@ -160,7 +130,7 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 | FR-33 | Offline fallback: use last-synced rules if API unreachable | Planned |
 | FR-34 | Expose `policy.sync` MCP tool for manual sync | Planned |
 
-### 4.5 Audit Log
+### 4.4 Audit Log
 
 | ID | Requirement | Status |
 |---|---|---|
@@ -170,16 +140,15 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 | FR-43 | Connected: optionally push audit events to Cortex Cloud | Planned |
 | FR-44 | Expose `audit.query` MCP tool for searching audit history | Planned |
 
-### 4.6 Enterprise MCP Tools
+### 4.5 Enterprise MCP Tools
 
 | ID | Tool Name | Description | Status |
 |---|---|---|---|
-| FR-50 | `license.status` | Returns license info, validity, expiry | Planned |
-| FR-51 | `telemetry.status` | Shows telemetry config and last push | Planned |
-| FR-52 | `policy.sync` | Triggers manual policy sync | Planned |
-| FR-53 | `policy.list` | Lists all active policies (local + org) | Planned |
-| FR-54 | `audit.query` | Search audit log by date range, tool, entity | Planned |
-| FR-55 | `enterprise.status` | Overview: edition, license, telemetry, policy health | Planned |
+| FR-50 | `telemetry.status` | Shows telemetry config and last push | Planned |
+| FR-51 | `policy.sync` | Triggers manual policy sync | Planned |
+| FR-52 | `policy.list` | Lists all active policies (local + org) | Planned |
+| FR-53 | `audit.query` | Search audit log by date range, tool, entity | Planned |
+| FR-54 | `enterprise.status` | Overview: edition, telemetry, policy health | Planned |
 
 ---
 
@@ -188,13 +157,12 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 | ID | Requirement | Target |
 |---|---|---|
 | NFR-01 | Plugin load time | < 100ms added to server startup |
-| NFR-02 | License validation | < 10ms (pure crypto, no I/O beyond file read) |
-| NFR-03 | Telemetry payload size | < 1KB per push |
-| NFR-04 | Audit log disk usage | < 1MB/month per active repo |
-| NFR-05 | Zero source code leakage | No file contents, embeddings, or graph data sent externally |
-| NFR-06 | Graceful degradation | If any enterprise feature fails, fall back to community silently |
-| NFR-07 | No breaking changes to community | Enterprise plugin must never alter community tool behavior |
-| NFR-08 | Air-gapped: zero network calls | Verified by running with network disabled |
+| NFR-02 | Telemetry payload size | < 1KB per push |
+| NFR-03 | Audit log disk usage | < 1MB/month per active repo |
+| NFR-04 | Zero source code leakage | No file contents, embeddings, or graph data sent externally |
+| NFR-05 | Graceful degradation | If any enterprise feature fails, fall back to community silently |
+| NFR-06 | No breaking changes to community | Enterprise plugin must never alter community tool behavior |
+| NFR-07 | Air-gapped: zero network calls | Verified by running with network disabled |
 
 ---
 
@@ -202,17 +170,15 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 
 ### Phase 1: Foundation (Target: v0.1.0)
 
-**Goal:** Enterprise plugin loads and license validation works.
+**Goal:** Enterprise plugin loads and enterprise tooling is available.
 
 - [x] Plugin loader in public Cortex
 - [x] Enterprise package scaffolding
 - [x] Edition detection in dashboard
-- [ ] License file parser and Ed25519 validator
-- [ ] `license.status` MCP tool
 - [ ] `enterprise.status` MCP tool
 - [ ] Bundled embedding model for air-gapped delivery
 
-**Exit criteria:** Customer can install enterprise package with a license file and see "Enterprise" in dashboard.
+**Exit criteria:** Customer can install enterprise package and see "Enterprise" in dashboard.
 
 ### Phase 2: Observability (Target: v0.2.0)
 
@@ -272,7 +238,6 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 |---|---|---|
 | MCP protocol changes | Enterprise tools break | Pin MCP SDK version, test against new releases before updating |
 | Low adoption of enterprise features | No revenue | Start with free pilots, prove ROI before charging |
-| Security vulnerability in license validation | License bypass | Use proven crypto (Ed25519), keep validation logic minimal |
 | Cloud API becomes bottleneck | Connected edition unreliable | All enterprise features work offline; cloud is enhancement, not dependency |
 | Competition from GitHub/JetBrains | They build similar governance | Move fast; own "AI Agent Governance" category before incumbents |
 
@@ -284,4 +249,4 @@ Validation: Ed25519 public key embedded in the package verifies the signature. N
 2. **Pricing model:** Per seat vs per repo vs hybrid? Need pilot feedback.
 3. **SSO provider:** Build own or use Auth0/Clerk/WorkOS?
 4. **Audit log retention:** How long should audit logs be kept? Configurable per customer?
-5. **Enterprise trial:** Free trial period before requiring license? Duration?
+5. **Enterprise trial:** Free trial period before paid rollout? Duration?

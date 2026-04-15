@@ -10,7 +10,6 @@ const PERMISSIONS: Record<string, Role[]> = {
   "policy.write":          ["admin"],
   "policy.sync":           ["admin"],
   "telemetry.configure":   ["admin"],
-  "license.manage":        ["admin"],
 
   // Admin + developer
   "audit.query":           ["admin", "developer"],
@@ -19,7 +18,6 @@ const PERMISSIONS: Record<string, Role[]> = {
 
   // All roles
   "enterprise.status":     ["admin", "developer", "readonly"],
-  "license.status":        ["admin", "developer", "readonly"],
 };
 
 export function checkAccess(role: Role, action: string): boolean {

@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { LicenseInfo } from "@danielblomma/cortex-core/license/check";
 import type { EnterpriseConfig } from "@danielblomma/cortex-core/config";
 import type { TelemetryCollector } from "@danielblomma/cortex-core/telemetry/collector";
 import type { AuditWriter } from "@danielblomma/cortex-core/audit/writer";
@@ -39,7 +38,6 @@ function accessDenied(role: Role, action: string) {
 
 export function registerEnterpriseTools(
   server: McpServer,
-  license: LicenseInfo,
   collector: TelemetryCollector,
   auditWriter: AuditWriter | null,
   config: EnterpriseConfig,
@@ -54,42 +52,6 @@ export function registerEnterpriseTools(
   if (!VALID_ROLES.has(roleCandidate as Role) && config.rbac.enabled) {
     process.stderr.write(`[cortex-enterprise] Invalid RBAC role '${roleCandidate}', falling back to 'readonly'\n`);
   }
-
-  // ── license.status ──
-  server.registerTool(
-    "license.status",
-    {
-      description: "Return current Cortex Enterprise license information, validity and expiry.",
-      inputSchema: z.object({}),
-    },
-    async () => {
-      if (config.rbac.enabled && !checkAccess(role, "license.status")) {
-        return accessDenied(role, "license.status");
-      }
-
-      auditWriter?.log({
-        timestamp: new Date().toISOString(),
-        tool: "license.status",
-        input: {},
-        result_count: 1,
-        entities_returned: [],
-        rules_applied: [],
-        duration_ms: 0,
-      });
-
-      return buildToolResult({
-        customer: license.customer,
-        edition: license.edition,
-        valid: license.valid,
-        issued: license.issued,
-        expires: license.expires,
-        days_until_expiry: license.daysUntilExpiry,
-        max_repos: license.max_repos,
-        features: license.features,
-        warning: license.warning ?? null,
-      });
-    },
-  );
 
   // ── telemetry.status ──
   server.registerTool(
@@ -254,7 +216,7 @@ export function registerEnterpriseTools(
   server.registerTool(
     "enterprise.status",
     {
-      description: "Return Cortex Enterprise overview: edition, license, and feature status.",
+      description: "Return Cortex Enterprise overview: version, feature status, and policy health.",
       inputSchema: z.object({}),
     },
     async () => {
@@ -268,13 +230,6 @@ export function registerEnterpriseTools(
       return buildToolResult({
         edition: "enterprise",
         version,
-        license: {
-          valid: license.valid,
-          customer: license.customer,
-          expires: license.expires,
-          days_until_expiry: license.daysUntilExpiry,
-          warning: license.warning ?? null,
-        },
         features: {
           telemetry: config.telemetry.enabled ? "active" : "disabled",
           policy_sync: config.policy.enabled ? "active" : "disabled",

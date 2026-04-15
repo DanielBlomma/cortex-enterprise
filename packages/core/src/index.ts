@@ -2,11 +2,6 @@
 export { loadEnterpriseConfig } from "./config.js";
 export type { TelemetryConfig, AuditConfig, PolicyConfig, EnterpriseConfig } from "./config.js";
 
-// License
-export { loadLicense } from "./license/check.js";
-export type { LicenseInfo } from "./license/check.js";
-export { PUBLIC_KEY } from "./license/public-key.js";
-
 // Telemetry
 export { TelemetryCollector } from "./telemetry/collector.js";
 export type { TelemetryMetrics } from "./telemetry/collector.js";

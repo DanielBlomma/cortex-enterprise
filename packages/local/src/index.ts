@@ -2,7 +2,6 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadEnterpriseConfig, type EnterpriseConfig } from "@danielblomma/cortex-core/config";
-import { loadLicense } from "@danielblomma/cortex-core/license/check";
 import { deployBundledModel } from "./model/deploy.js";
 import { TelemetryCollector } from "@danielblomma/cortex-core/telemetry/collector";
 import { pushMetrics } from "./telemetry/sync.js";
@@ -69,7 +68,6 @@ export async function register(server: McpServer): Promise<void> {
     process.stderr.write(`[cortex-enterprise] Bundled embedding model deployed\n`);
   }
 
-  const license = loadLicense(contextDir);
   const config = loadEnterpriseConfig(contextDir);
   activeConfig = config;
 
@@ -93,16 +91,8 @@ export async function register(server: McpServer): Promise<void> {
     }
   }
 
-  if (license.valid) {
-    registerEnterpriseTools(server, license, collector, auditWriter, config, contextDir, policyStore, version);
-    process.stderr.write(`[cortex-enterprise] v${version} — licensed to: ${license.customer}\n`);
-  } else {
-    process.stderr.write(`[cortex-enterprise] License invalid: ${license.error}\n`);
-  }
-
-  if (license.warning) {
-    process.stderr.write(`[cortex-enterprise] Warning: ${license.warning}\n`);
-  }
+  registerEnterpriseTools(server, collector, auditWriter, config, contextDir, policyStore, version);
+  process.stderr.write(`[cortex-enterprise] v${version}\n`);
 
   // Log active features
   const features: string[] = [];

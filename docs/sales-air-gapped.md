@@ -49,7 +49,7 @@ Think of it like this:
 
 2. **Your IT team installs it** — A standard software install from the local file. No internet connection is needed at any point. No external downloads happen during or after installation.
 
-3. **A license file activates it** — We provide a digitally signed license file containing your organization's name, the expiry date, and which features are enabled. Cortex verifies this signature using a key that's built into the software. No license server. No activation call. It works the same way whether the machine is online or has never seen the internet.
+3. **The package is self-contained** — Everything needed to run is already inside the delivered package: Cortex, enterprise features, and the built-in model. No activation call. No external dependency. It works the same way whether the machine is online or has never seen the internet.
 
 4. **Your security team distributes the rules** — Organization-wide rules are simple text files. Your security or platform team writes them and distributes them through your internal channels — the same way you distribute any configuration today. Examples of rules:
    - "AI agents must never surface deprecated code"
@@ -67,24 +67,6 @@ Think of it like this:
 **Nothing.**
 
 Zero network traffic. The software is designed to work with the network cable unplugged. We verify this by testing with network access completely disabled.
-
----
-
-## The license
-
-Traditional software licensing requires "phoning home" to a license server. We don't do that.
-
-Instead, you receive a license file — a small text document with a digital signature. Think of it like a notarized letter: anyone can verify it's authentic by checking the signature, but no one needs to call the notary to do so.
-
-The license contains:
-- Your organization's name
-- The expiry date
-- How many projects you can use it with
-- Which features are enabled
-
-**Renewal** is simple: we send you a new license file through your secure channel. You replace the old one. No downtime, no reinstall.
-
-If the license expires, Cortex doesn't break — it simply falls back to the free community edition until you renew.
 
 ---
 
@@ -139,7 +121,7 @@ Everything needed to run, with no external dependencies:
 | Component | What it does |
 |---|---|
 | Cortex core | Reads your code, builds an understanding of it, answers AI questions |
-| Enterprise features | License validation, rule enforcement, audit logging, access control |
+| Enterprise features | Rule enforcement, audit logging, access control |
 | Built-in AI model | Understands code structure without downloading anything from the internet |
 | All dependencies | Fully self-contained — nothing is fetched after install |
 
@@ -157,9 +139,9 @@ Everything needed to run, with no external dependencies:
 
 ## Pricing
 
-**Annual site license: $50,000 - $200,000/year** depending on the number of developers and projects.
+**Annual enterprise subscription: $50,000 - $200,000/year** depending on the number of developers and projects.
 
-Includes: the complete software package, license file, built-in AI model, offline documentation, and a dedicated support channel.
+Includes: the complete software package, built-in AI model, offline documentation, and a dedicated support channel.
 
 ---
 
@@ -170,10 +152,9 @@ Includes: the complete software package, license file, built-in AI model, offlin
 | Does it need internet? | No. Zero network traffic, ever. |
 | Does source code leave the machine? | Never. |
 | How is it installed? | From a file delivered through your secure channel. |
-| How is it licensed? | A signed license file verified offline. No license server. |
+| How is it enabled? | Install the offline package and distribute your rules locally. |
 | How are rules managed? | Text files distributed through your internal channels. |
 | Is there analytics? | Yes, a local dashboard on each machine. |
 | Is there an audit trail? | Yes, log files on each machine. Exportable. |
 | How are updates delivered? | New package through your secure channel. |
-| What if the license expires? | Falls back to the free edition. Nothing breaks. |
 | How long does setup take? | Under 30 minutes per machine. |

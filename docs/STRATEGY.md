@@ -63,33 +63,24 @@ Core (public, MIT) remains free. Enterprise is a paid plugin layer.
 │  │  └── Dashboard           │   │
 │  └──────────────────────────┘   │
 │                                 │
-│  ┌──────────────────────────┐   │
-│  │  License file (.lic)     │   │
-│  │  - Valid until date      │   │
-│  │  - Signed with public    │   │
-│  │    key (offline check)   │   │
-│  └──────────────────────────┘   │
-│                                 │
 │  🚫 No network traffic         │
 └─────────────────────────────────┘
 ```
 
-**License model:** Signed `.lic` file, validated offline with embedded public key. Contains: customer name, expiry date, max repos. Renewal = new `.lic` via secure channel (USB, internal portal).
-
 **Delivery:** Pre-packaged npm tarball with bundled embedding model. Or Docker image for offline load.
 
-**Pricing:** ~$50-200k/year (site license).
+**Pricing:** ~$50-200k/year (annual enterprise subscription).
 
 ### Comparison
 
 | | Connected | Air-gapped |
 |---|---|---|
 | Internet | Yes (minimal) | No |
-| Auth | SSO/SAML via web | License file |
+| Auth | SSO/SAML via web | Local/offline operation |
 | Rules | Central push | Local per repo |
 | Analytics | Aggregated dashboard | Local dashboard only |
 | Updates | Auto-update | Manual delivery |
-| Pricing | Per seat/month | Annual site license |
+| Pricing | Per seat/month | Annual enterprise subscription |
 | Typical customer | 50-500 devs, SaaS | Bank, defense, healthcare |
 
 ---
@@ -157,7 +148,7 @@ Core (public, MIT) remains free. Enterprise is a paid plugin layer.
 1. Make dashboard ROI numbers shareable (export to PDF/Slack)
 2. Build a "Cortex for Teams" pilot with 2-3 companies (free, for case studies)
 3. Publish content around "AI Agent Governance" — own the category name
-4. Sell: Pilot → POC with IT security/compliance → Enterprise license
+4. Sell: Pilot → POC with IT security/compliance → Enterprise rollout
 
 ---
 

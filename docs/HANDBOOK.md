@@ -14,7 +14,7 @@ A complete guide to every feature in the system, what it does, and how it fits t
 6. [The knowledge graph — how Cortex understands your code](#6-the-knowledge-graph--how-cortex-understands-your-code)
 7. [Search — how AI assistants ask questions](#7-search--how-ai-assistants-ask-questions)
 8. [Rules — how you control what AI sees](#8-rules--how-you-control-what-ai-sees)
-9. [Licensing — how activation works](#9-licensing--how-activation-works)
+9. [Enterprise startup — how activation works](#9-enterprise-startup--how-activation-works)
 10. [Usage tracking — measuring AI value](#10-usage-tracking--measuring-ai-value)
 11. [Audit logging — the compliance trail](#11-audit-logging--the-compliance-trail)
 12. [Access control — who can do what](#12-access-control--who-can-do-what)
@@ -79,7 +79,7 @@ Adds centralized control for organizations. Rules sync from a cloud dashboard. U
 
 ### Enterprise Air-Gapped (paid, no internet)
 
-The same enterprise features, but everything runs offline. Rules are distributed as local files. Licensing uses signed files verified offline. A bundled AI model means nothing is downloaded. Zero network traffic.
+The same enterprise features, but everything runs offline. Rules are distributed as local files. A bundled AI model means nothing is downloaded. Zero network traffic.
 
 ---
 
@@ -95,7 +95,6 @@ The same enterprise features, but everything runs offline. Rules are distributed
 | Local project rules | Yes | Yes | Yes |
 | Organization-wide rules | -- | Yes (from cloud) | Yes (from files) |
 | Rule merge (org overrides local) | -- | Yes | Yes |
-| License validation | -- | Yes | Yes (offline) |
 | Usage tracking | -- | Yes (cloud + local) | Yes (local only) |
 | Audit logging | -- | Yes (cloud + local) | Yes (local only) |
 | Role-based access control | -- | Yes | Yes |
@@ -269,35 +268,21 @@ Rules are written as simple text files in YAML format. For organization-wide rul
 
 ---
 
-## 9. Licensing — how activation works
+## 9. Enterprise startup — how activation works
 
-Enterprise features require a valid license.
+Enterprise features activate when the enterprise package is installed and the relevant configuration is present.
 
-### How it works
+### Connected edition
 
-A license is a small text file containing your organization's information (name, expiry date, allowed features) and a digital signature. When Cortex starts, it reads this file and checks:
+Connected setups use `.context/enterprise.yaml` to point Cortex at the cloud endpoints for telemetry and policy sync. If those endpoints or API keys are missing, the plugin still starts, but the related cloud features stay disabled.
 
-1. **Is the signature authentic?** — The signature is verified using a public key built into the software. This is the same kind of cryptography used in secure messaging — it proves the license was issued by us and hasn't been tampered with. No network call is needed.
+### Air-gapped edition
 
-2. **Has it expired?** — The license has an expiry date. If it's past, enterprise features are disabled.
+Air-gapped setups use the same package, but keep everything local. Rules are distributed as files, audit logs stay on disk, and the bundled embedding model avoids any external download.
 
-3. **Is it about to expire?** — If the license expires within 30 days, a warning is shown.
+### Failure behavior
 
-### What happens if the license is invalid
-
-Cortex doesn't break. It simply disables enterprise features and falls back to the free community edition. The developer can keep working — they just won't have rules enforcement, audit logging, or the other enterprise features.
-
-### Renewal
-
-We send you a new license file. You replace the old one. No reinstall, no downtime, no activation calls.
-
-### What the license contains
-
-- Your organization's name
-- The edition (connected or air-gapped)
-- Issue date and expiry date
-- Maximum number of projects allowed
-- Which features are enabled
+Cortex is designed to degrade feature-by-feature, not fail wholesale. If telemetry push fails, policy sync is unavailable, or audit logging is disabled, the rest of the system keeps running and the core search experience remains available.
 
 ---
 
@@ -378,7 +363,7 @@ Role-based access control (RBAC) defines what each person can do within Cortex E
 |---|---|---|
 | **Admin** | Platform leads, security officers | Everything: manage rules, sync policies, configure tracking, view all data |
 | **Developer** | Engineers using AI tools daily | Use all search and context tools, view rules, query audit logs, check system status |
-| **Read-only** | Managers, observers | View system status and license information only |
+| **Read-only** | Managers, observers | View system status only |
 
 ### Detailed permissions
 
@@ -387,12 +372,10 @@ Role-based access control (RBAC) defines what each person can do within Cortex E
 | Create and edit rules | Yes | -- | -- |
 | Sync rules from cloud | Yes | -- | -- |
 | Configure usage tracking | Yes | -- | -- |
-| Manage licenses | Yes | -- | -- |
 | Query audit logs | Yes | Yes | -- |
 | List active rules | Yes | Yes | -- |
 | View usage metrics | Yes | Yes | -- |
 | Check system status | Yes | Yes | Yes |
-| Check license status | Yes | Yes | Yes |
 
 ### Default behavior
 
@@ -402,7 +385,7 @@ RBAC is disabled by default. When disabled, everyone has admin access. When enab
 
 ## 13. The tools — what commands are available
 
-Cortex provides two sets of tools: context tools (available in all editions) and enterprise tools (available with a valid enterprise license).
+Cortex provides two sets of tools: context tools (available in all editions) and enterprise tools (available when the enterprise add-on is installed).
 
 ### Context tools (all editions)
 
@@ -422,12 +405,11 @@ These are management and monitoring tools added by the enterprise edition.
 
 | Tool | What it does |
 |---|---|
-| **License status** | Shows your license information: who it's issued to, when it expires, how many days remain, and which features are enabled. Warns if expiry is approaching. |
 | **Usage status** | Shows current usage metrics: how many searches, how many tokens saved, whether cloud push is enabled, and the result of the last push. |
 | **Audit query** | Searches the audit log. You can filter by date range, by tool name, and limit the number of results. Returns entries newest-first. |
 | **Policy list** | Lists all active rules from both org and local sources. You can filter to see only org rules, only local rules, or both merged together. |
 | **Policy sync** | Manually triggers a rule sync. In Connected edition, this pulls the latest rules from the cloud. In Air-Gapped edition, this reloads from the local org-rules file. |
-| **Enterprise status** | A single overview of everything: license health, which features are active, how many rules are loaded (org vs local), and the result of the last policy sync. This is the "health check" command. |
+| **Enterprise status** | A single overview of everything: which features are active, how many rules are loaded (org vs local), and the result of the last policy sync. This is the "health check" command. |
 
 ---
 
@@ -440,7 +422,6 @@ Cortex includes a local dashboard that shows the state of your index and usage m
 - **Index health** — How many entities are indexed, when the last scan happened, how fresh the data is
 - **Usage metrics** — Search count, token savings, results returned
 - **Edition indicator** — Shows **[Community]** or **[Enterprise]** in the header
-- **License status** (enterprise) — Validity, expiry date, warnings
 
 ### How to access it
 
@@ -545,12 +526,6 @@ Controls enterprise features. Only needed for enterprise editions.
 
 Each rule has: ID, description, priority (0-1000), scope (global or specific), and enforce (true/false). See the [Rules section](#8-rules--how-you-control-what-ai-sees) for details.
 
-### License — `.context/cortex.lic`
-
-A signed text file containing: customer name, edition, issue date, expiry date, max repos, enabled features, and a digital signature. See the [Licensing section](#9-licensing--how-activation-works) for details.
-
----
-
 ## 19. How everything connects
 
 Here's the complete picture of how all the pieces work together:
@@ -605,7 +580,6 @@ AI ASSISTANT uses the context to help the developer
 | Local rules | `.context/rules.yaml` |
 | Organization rules | `.context/policies/org-rules.yaml` |
 | Enterprise config | `.context/enterprise.yaml` |
-| License file | `.context/cortex.lic` |
 | Audit logs | `.context/audit/` |
 | Usage metrics | `.context/telemetry/` |
 | Captured notes | `.context/notes/` |

@@ -1,7 +1,7 @@
 {
   "name": "@danielblomma/cortex-cloud",
   "version": "0.1.0",
-  "description": "Cortex Cloud — license signing, policy management, telemetry ingestion",
+  "description": "Cortex Cloud — policy management and telemetry ingestion",
   "type": "module",
   "private": true,
   "main": "dist/index.js",
