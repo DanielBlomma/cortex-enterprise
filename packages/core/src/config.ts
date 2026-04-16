@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Role, RBACConfig } from "./rbac/check.js";
+import { parseValidatorsConfig, type ValidatorsConfig } from "./validators/config.js";
 
 export type TelemetryConfig = {
   enabled: boolean;
@@ -26,6 +27,7 @@ export type EnterpriseConfig = {
   audit: AuditConfig;
   policy: PolicyConfig;
   rbac: RBACConfig;
+  validators: ValidatorsConfig;
 };
 
 const DEFAULTS: EnterpriseConfig = {
@@ -49,6 +51,7 @@ const DEFAULTS: EnterpriseConfig = {
     enabled: false,
     default_role: "developer",
   },
+  validators: {},
 };
 
 const VALID_ROLES: Role[] = ["admin", "developer", "readonly"];
@@ -135,5 +138,6 @@ export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
       enabled: fields["rbac.enabled"] === "true",
       default_role: isValidRole(fields["rbac.default_role"]) ? fields["rbac.default_role"] : DEFAULTS.rbac.default_role,
     },
+    validators: parseValidatorsConfig(fields),
   };
 }

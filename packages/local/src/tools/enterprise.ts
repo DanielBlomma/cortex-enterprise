@@ -9,8 +9,11 @@ import type { InjectionMatch } from "@danielblomma/cortex-core/policy/injection"
 import { getLastPush } from "../telemetry/sync.js";
 import { syncFromCloud, syncFromLocal, getLastSync } from "../policy/sync.js";
 import { queueViolation } from "../violations/push.js";
+import { queueReviewResult } from "../reviews/push.js";
 import { queryAuditLog } from "@danielblomma/cortex-core/audit/query";
 import { checkAccess, getAccessDeniedMessage, type Role } from "@danielblomma/cortex-core/rbac/check";
+import { runValidators } from "@danielblomma/cortex-core/validators/engine";
+import "@danielblomma/cortex-core/validators/builtins";
 
 type ToolPayload = Record<string, unknown>;
 
@@ -304,6 +307,106 @@ export function registerEnterpriseTools(
           weight: m.weight,
         })),
         sanitized: result.sanitized ?? null,
+      });
+    },
+  );
+
+  // ── context.review ──
+  server.registerTool(
+    "context.review",
+    {
+      description:
+        "Run enterprise policy validators against the current project. " +
+        "Checks enforced policies (test coverage, file size, external API calls, code review) " +
+        "and returns pass/fail results with actionable details.",
+      inputSchema: z.object({
+        scope: z.enum(["all", "changed"]).default("changed")
+          .describe("'changed' validates only git-modified files; 'all' validates everything"),
+        include_passed: z.boolean().default(true)
+          .describe("Include passing validators in results"),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "context.review")) {
+        return accessDenied(role, "context.review");
+      }
+
+      const parsed = z.object({
+        scope: z.enum(["all", "changed"]).default("changed"),
+        include_passed: z.boolean().default(true),
+      }).parse(input ?? {});
+
+      const projectRoot = process.env.CORTEX_PROJECT_ROOT?.trim() || process.cwd();
+
+      // Collect changed files via git
+      let changedFiles: string[] | undefined;
+      if (parsed.scope === "changed") {
+        try {
+          const { execSync } = await import("node:child_process");
+          const output = execSync("git diff --name-only HEAD 2>/dev/null || git diff --name-only", {
+            cwd: projectRoot,
+            encoding: "utf8",
+            timeout: 5000,
+          });
+          changedFiles = output.split("\n").map((f) => f.trim()).filter(Boolean);
+        } catch {
+          changedFiles = [];
+        }
+      }
+
+      // Build set of enforced policy IDs
+      const policies = policyStore.getMergedPolicies();
+      const enforcedIds = new Set(
+        policies.filter((p) => p.enforce).map((p) => p.id),
+      );
+
+      const output = await runValidators(enforcedIds, {
+        contextDir,
+        projectRoot,
+        changedFiles,
+      }, config.validators);
+
+      // Filter out passed if requested
+      const results = parsed.include_passed
+        ? output.results
+        : output.results.filter((r) => !r.pass);
+
+      // Queue failures as violations
+      const now = new Date().toISOString();
+      for (const r of output.results) {
+        if (!r.pass) {
+          queueViolation({
+            rule_id: r.policy_id,
+            severity: r.severity,
+            message: r.message.slice(0, 2000),
+            metadata: r.detail ? JSON.stringify({ detail: r.detail }).slice(0, 5000) : undefined,
+            occurred_at: now,
+          });
+        }
+        queueReviewResult({
+          policy_id: r.policy_id,
+          pass: r.pass,
+          severity: r.severity,
+          message: r.message,
+          detail: r.detail,
+          reviewed_at: now,
+        });
+      }
+
+      auditWriter?.log({
+        timestamp: now,
+        tool: "context.review",
+        input: parsed as Record<string, unknown>,
+        result_count: output.results.length,
+        entities_returned: output.results.map((r) => r.policy_id),
+        rules_applied: output.results.filter((r) => !r.pass).map((r) => r.policy_id),
+        duration_ms: 0,
+      });
+
+      return buildToolResult({
+        scope: parsed.scope,
+        results,
+        summary: output.summary,
       });
     },
   );

@@ -15,6 +15,7 @@ const PERMISSIONS: Record<string, Role[]> = {
   "audit.query":           ["admin", "developer"],
   "policy.list":           ["admin", "developer"],
   "telemetry.status":      ["admin", "developer"],
+  "context.review":        ["admin", "developer"],
 
   // All roles
   "enterprise.status":     ["admin", "developer", "readonly"],

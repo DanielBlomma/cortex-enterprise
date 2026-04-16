@@ -10,6 +10,7 @@ import { PolicyStore } from "@danielblomma/cortex-core/policy/store";
 import { syncFromCloud, syncFromLocal } from "./policy/sync.js";
 import { registerEnterpriseTools } from "./tools/enterprise.js";
 import { pushViolations } from "./violations/push.js";
+import { pushReviewResults } from "./reviews/push.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -120,9 +121,10 @@ export async function register(server: McpServer): Promise<void> {
         if (config.telemetry.endpoint) {
           await pushMetrics(collector.getMetrics(), config.telemetry.endpoint, config.telemetry.api_key);
         }
-        // Push queued violations alongside telemetry
+        // Push queued violations and review results alongside telemetry
         if (config.policy.endpoint && config.policy.api_key) {
           await pushViolations(config.policy.endpoint, config.policy.api_key);
+          await pushReviewResults(config.policy.endpoint, config.policy.api_key);
         }
       } catch (err) {
         process.stderr.write(`[cortex-enterprise] Telemetry flush error: ${err}\n`);
