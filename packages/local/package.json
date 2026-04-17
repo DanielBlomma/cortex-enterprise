@@ -1,6 +1,6 @@
 {
   "name": "@danielblomma/cortex-enterprise",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Enterprise plugin for Cortex MCP — adds telemetry, policy sync, audit and enterprise tools.",
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,7 @@
   "bin": {
     "cortex": "bin/cortex.mjs"
   },
-  "files": ["dist", "models", "bin"],
+  "files": ["dist", "models", "bin", "commands", ".claude-plugin"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",

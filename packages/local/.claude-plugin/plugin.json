@@ -1,0 +1,9 @@
+{
+  "name": "cortex-enterprise",
+  "version": "0.6.1",
+  "description": "Enterprise policy enforcement for Cortex — adds /review with context.review MCP policy validation.",
+  "author": {
+    "name": "Daniel Blomma",
+    "email": "daniel.blomma@gmail.com"
+  }
+}
