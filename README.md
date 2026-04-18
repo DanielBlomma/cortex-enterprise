@@ -21,6 +21,8 @@ Requires `@danielblomma/cortex-mcp` >= 0.6.0.
 
 Cortex automatically detects and loads this package at startup. No configuration needed — install the package and it activates.
 
+Installing the package also exposes `/cortex-enterprise:review` in Claude Code — a policy-aware review command that runs the `context.review` MCP tool alongside a standard code review.
+
 ## Docs
 
 - [Strategy & Roadmap](docs/STRATEGY.md)
