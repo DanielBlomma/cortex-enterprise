@@ -7,6 +7,8 @@ const CloudPolicySchema = z.object({
   priority: z.number().int().min(0).max(1000).default(50),
   scope: z.string().max(200).default("global"),
   enforce: z.boolean().default(true),
+  type: z.string().min(1).max(100).nullable().optional(),
+  config: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 const CloudResponseSchema = z.object({
@@ -73,7 +75,16 @@ export async function syncFromCloud(
 
     const raw = await response.json();
     const data = CloudResponseSchema.parse(raw);
-    const policies: OrgPolicy[] = data.rules.map(r => ({ ...r, source: "org" as const }));
+    const policies: OrgPolicy[] = data.rules.map((r) => ({
+      id: r.id,
+      description: r.description,
+      priority: r.priority,
+      scope: r.scope,
+      enforce: r.enforce,
+      type: r.type ?? null,
+      config: r.config ?? null,
+      source: "org" as const,
+    }));
 
     store.writeOrgPolicies(policies);
 

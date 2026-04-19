@@ -16,7 +16,27 @@ export type ValidatorDef = {
   check: (ctx: ValidatorContext, options: Record<string, unknown>) => Promise<ValidatorResult>;
 };
 
+// Generic evaluators are keyed by `type`, not by policyId. One evaluator
+// can execute many policies (e.g. a single RegexEvaluator runs every
+// custom regex rule the user defines in cortex-web). Used when a policy
+// declares `type` + `config`; name-based validators are the fallback for
+// predefined rules that ship with the plugin.
+export type GenericEvaluatorDef = {
+  type: string;
+  check: (ctx: ValidatorContext, config: Record<string, unknown>) => Promise<ValidatorResult>;
+};
+
+// An enforced policy as passed to runValidators. `type` + `config` are
+// optional — predefined rules leave them null and fall back to the
+// name-based validator registry.
+export type EnforcedPolicy = {
+  id: string;
+  type?: string | null;
+  config?: Record<string, unknown> | null;
+};
+
 const registry = new Map<string, ValidatorDef>();
+const genericRegistry = new Map<string, GenericEvaluatorDef>();
 
 export function registerValidator(def: ValidatorDef): void {
   registry.set(def.policyId, def);
@@ -28,6 +48,18 @@ export function getValidator(policyId: string): ValidatorDef | undefined {
 
 export function getRegisteredPolicyIds(): string[] {
   return [...registry.keys()];
+}
+
+export function registerGenericEvaluator(def: GenericEvaluatorDef): void {
+  genericRegistry.set(def.type, def);
+}
+
+export function getGenericEvaluator(type: string): GenericEvaluatorDef | undefined {
+  return genericRegistry.get(type);
+}
+
+export function getRegisteredEvaluatorTypes(): string[] {
+  return [...genericRegistry.keys()];
 }
 
 export type ReviewResult = {
@@ -51,23 +83,71 @@ export type ReviewOutput = {
 };
 
 /**
- * Run validators for every enforced policy. For each policy ID in
- * `enforcedPolicyIds`, looks up a registered validator and invokes it.
- * If no validator is registered for an enforced policy, a warning-
- * severity result is emitted so the gap is visible instead of silent.
+ * Run validators for every enforced policy. Dispatch order per policy:
+ *   1. If the policy has a `type`, look it up in the generic evaluator
+ *      registry (cortex-web custom rules use this path).
+ *   2. Otherwise, look up a name-based validator by policy id
+ *      (predefined rules shipped with the plugin use this path).
+ *   3. If neither path yields an implementation, emit a warning so the
+ *      gap is visible instead of silent.
+ *
+ * Accepts either `Set<string>` (legacy id-only callers) or an array of
+ * `EnforcedPolicy` objects carrying `type` + `config` from the
+ * cortex-web policy sync. Set inputs are normalized to entries with
+ * null type/config, so they always route to the name-based registry.
  */
 export async function runValidators(
-  enforcedPolicyIds: Set<string>,
+  enforced: Set<string> | EnforcedPolicy[],
   ctx: ValidatorContext,
   validatorConfigs: Record<string, Record<string, unknown>>,
 ): Promise<ReviewOutput> {
+  const policies: EnforcedPolicy[] =
+    enforced instanceof Set
+      ? [...enforced].map((id) => ({ id }))
+      : enforced;
+
   const results: ReviewResult[] = [];
 
-  for (const policyId of enforcedPolicyIds) {
-    const def = registry.get(policyId);
+  for (const policy of policies) {
+    if (policy.type) {
+      const evaluator = genericRegistry.get(policy.type);
+      if (!evaluator) {
+        results.push({
+          policy_id: policy.id,
+          pass: false,
+          severity: "warning",
+          message: `No evaluator registered for type "${policy.type}"`,
+          detail:
+            "This policy declares a generic evaluator type that is not " +
+            "implemented in this version of the enterprise plugin. " +
+            "Upgrade the plugin or change the rule type.",
+        });
+        continue;
+      }
+      try {
+        const result = await evaluator.check(ctx, policy.config ?? {});
+        results.push({
+          policy_id: policy.id,
+          pass: result.pass,
+          severity: result.severity,
+          message: result.message,
+          detail: result.detail,
+        });
+      } catch (err) {
+        results.push({
+          policy_id: policy.id,
+          pass: false,
+          severity: "error",
+          message: `Evaluator error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      continue;
+    }
+
+    const def = registry.get(policy.id);
     if (!def) {
       results.push({
-        policy_id: policyId,
+        policy_id: policy.id,
         pass: false,
         severity: "warning",
         message: "No validator implementation registered for this policy",
@@ -79,11 +159,11 @@ export async function runValidators(
       continue;
     }
 
-    const options = validatorConfigs[policyId] ?? {};
+    const options = validatorConfigs[policy.id] ?? {};
     try {
       const result = await def.check(ctx, options);
       results.push({
-        policy_id: policyId,
+        policy_id: policy.id,
         pass: result.pass,
         severity: result.severity,
         message: result.message,
@@ -91,7 +171,7 @@ export async function runValidators(
       });
     } catch (err) {
       results.push({
-        policy_id: policyId,
+        policy_id: policy.id,
         pass: false,
         severity: "error",
         message: `Validator error: ${err instanceof Error ? err.message : String(err)}`,
