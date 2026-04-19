@@ -51,7 +51,10 @@ export type ReviewOutput = {
 };
 
 /**
- * Run all validators whose policyId appears in the given set of enforced policy IDs.
+ * Run validators for every enforced policy. For each policy ID in
+ * `enforcedPolicyIds`, looks up a registered validator and invokes it.
+ * If no validator is registered for an enforced policy, a warning-
+ * severity result is emitted so the gap is visible instead of silent.
  */
 export async function runValidators(
   enforcedPolicyIds: Set<string>,
@@ -60,8 +63,21 @@ export async function runValidators(
 ): Promise<ReviewOutput> {
   const results: ReviewResult[] = [];
 
-  for (const [policyId, def] of registry) {
-    if (!enforcedPolicyIds.has(policyId)) continue;
+  for (const policyId of enforcedPolicyIds) {
+    const def = registry.get(policyId);
+    if (!def) {
+      results.push({
+        policy_id: policyId,
+        pass: false,
+        severity: "warning",
+        message: "No validator implementation registered for this policy",
+        detail:
+          "This policy is enforced but the server-side check is missing. " +
+          "Either install an enterprise plugin that provides it, or disable " +
+          "enforcement in the policy dashboard.",
+      });
+      continue;
+    }
 
     const options = validatorConfigs[policyId] ?? {};
     try {

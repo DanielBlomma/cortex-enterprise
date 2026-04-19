@@ -174,6 +174,199 @@ registerValidator({
   },
 });
 
+// ── no-secrets-in-code ──
+
+// `placeholderAware` patterns capture a user-provided value (password, API
+// key, etc.) where a placeholder ("changeme", "<password>") is an acceptable
+// match. Opaque token patterns (AWS keys, GitHub PATs, private keys) are
+// shape-based — no placeholder filtering, since the shape itself is
+// effectively never a placeholder.
+const SECRET_PATTERNS: Array<{ name: string; re: RegExp; placeholderAware: boolean }> = [
+  { name: "AWS access key", re: /\bAKIA[0-9A-Z]{16}\b/, placeholderAware: false },
+  { name: "GitHub PAT", re: /\bghp_[A-Za-z0-9]{36}\b/, placeholderAware: false },
+  { name: "GitHub OAuth", re: /\bgho_[A-Za-z0-9]{36}\b/, placeholderAware: false },
+  { name: "GitHub refresh", re: /\bghr_[A-Za-z0-9]{36}\b/, placeholderAware: false },
+  { name: "GitHub app", re: /\bghs_[A-Za-z0-9]{36}\b/, placeholderAware: false },
+  { name: "Slack token", re: /\bxox[abpsr]-[A-Za-z0-9-]{10,}\b/, placeholderAware: false },
+  { name: "Google API key", re: /\bAIza[0-9A-Za-z\-_]{35}\b/, placeholderAware: false },
+  { name: "Stripe key", re: /\b(?:sk|rk)_live_[0-9a-zA-Z]{24,}\b/, placeholderAware: false },
+  { name: "Bearer token", re: /\bBearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}\b/, placeholderAware: false },
+  { name: "Private key", re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/, placeholderAware: false },
+  { name: "Hardcoded password", re: /\b(?:password|passwd|pwd)\s*[=:]\s*["'][^"'\s<>{}]{4,}["']/i, placeholderAware: true },
+  { name: "Hardcoded API key", re: /\b(?:api[-_]?key|apikey|secret|auth[-_]?token)\s*[=:]\s*["'][^"'\s<>{}]{8,}["']/i, placeholderAware: true },
+  { name: "Connection string password", re: /\b(?:password|pwd)\s*=\s*[^;'"<>\s]{4,}(?:;|$)/i, placeholderAware: true },
+];
+
+// Heuristic placeholder values — matched as whole-token, not substring,
+// so a real secret like "Sup3rSecret!" doesn't get filtered by the
+// placeholder "secret". Compared case-insensitively after stripping
+// surrounding quotes, braces, angle brackets, and whitespace.
+const PLACEHOLDER_VALUES = new Set([
+  "changeme", "change-me", "changethis", "todo",
+  "password", "passwd", "pwd", "password123", "secret", "example",
+  "your-password-here", "yourpasswordhere", "your-api-key", "yourapikey",
+  "xxx", "xxxx", "xxxxxx", "redacted", "hidden",
+]);
+
+function extractSecretValue(match: string): string {
+  // Strip a leading "name=" or "name:" prefix, surrounding quotes/braces/angles.
+  const afterAssign = match.replace(/^[^=:]*[=:]\s*/, "");
+  return afterAssign
+    .trim()
+    .replace(/^["'`<{]+|["'`>};]+$/g, "")
+    .toLowerCase();
+}
+
+const TEXT_FILE_RES = /\.(?:json|ya?ml|toml|ini|env|config|xml|properties|tf|tfvars|sh|ps1|py|js|mjs|cjs|ts|tsx|jsx|cs|vb|java|go|rs|rb|php|sql|md|txt)$/i;
+const BINARY_SNIFF_BYTES = 512;
+
+registerValidator({
+  policyId: "no-secrets-in-code",
+  async check(ctx: ValidatorContext, options: Record<string, unknown>): Promise<ValidatorResult> {
+    const files = ctx.changedFiles ?? [];
+    if (files.length === 0) {
+      return { pass: true, severity: "info", message: "No changed files to scan for secrets" };
+    }
+
+    const allowlist = Array.isArray(options.allowlist_paths)
+      ? options.allowlist_paths.filter((p): p is string => typeof p === "string")
+      : ["tests/", "test/", "__tests__/", "fixtures/", "mocks/", "docs/"];
+
+    const maxBytes = typeof options.max_scan_bytes === "number" ? options.max_scan_bytes : 2_000_000;
+
+    const hits: string[] = [];
+    let scanned = 0;
+
+    for (const file of files) {
+      if (allowlist.some((p) => file.includes(p))) continue;
+      if (!TEXT_FILE_RES.test(file) && !/(?:^|\/)\.env(?:\.|$)|(?:^|\/)appsettings/i.test(file)) continue;
+
+      const abs = join(ctx.projectRoot, file);
+      try {
+        const stat = statSync(abs);
+        if (stat.size > maxBytes) continue;
+
+        const buf = readFileSync(abs);
+        // Skip binaries: null byte in sniff region → binary.
+        const sniff = buf.subarray(0, Math.min(buf.length, BINARY_SNIFF_BYTES));
+        if (sniff.includes(0)) continue;
+
+        const content = buf.toString("utf8");
+        scanned += 1;
+
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i += 1) {
+          const line = lines[i];
+          for (const { name, re, placeholderAware } of SECRET_PATTERNS) {
+            const match = line.match(re);
+            if (!match) continue;
+            if (placeholderAware) {
+              const value = extractSecretValue(match[0]);
+              if (PLACEHOLDER_VALUES.has(value)) continue;
+            }
+            hits.push(`${file}:${i + 1} — ${name}`);
+          }
+        }
+      } catch {
+        // Unreadable file — skip
+      }
+    }
+
+    if (hits.length === 0) {
+      return {
+        pass: true,
+        severity: "info",
+        message: `No secret patterns detected in ${scanned} changed file${scanned === 1 ? "" : "s"}`,
+      };
+    }
+
+    return {
+      pass: false,
+      severity: "error",
+      message: `${hits.length} potential secret${hits.length === 1 ? "" : "s"} detected in changed files`,
+      detail: hits.slice(0, 30).join("\n") + (hits.length > 30 ? `\n... and ${hits.length - 30} more` : ""),
+    };
+  },
+});
+
+// ── no-env-in-prompts ──
+
+// Lines that both reference an env var AND contain prompt-like signals.
+const ENV_ACCESS_RES: RegExp[] = [
+  /\bprocess\.env\.[A-Z][A-Z0-9_]*/,
+  /\bprocess\.env\[\s*['"][A-Z][A-Z0-9_]*['"]\s*\]/,
+  /\bos\.environ\[\s*['"][A-Z][A-Z0-9_]*['"]\s*\]/,
+  /\bos\.getenv\(\s*['"][A-Z][A-Z0-9_]*['"]/,
+];
+
+const PROMPT_CONTEXT_RES = /\b(?:prompt|system[_ -]?message|instructions?|role\s*[:=]\s*["'](?:system|user|assistant)["']|you\s+are\s+(?:a|an|the)\b|respond\s+with|answer\s+as|act\s+as)\b/i;
+
+const PROMPT_VAR_NAMES_RES = /\b(?:prompt|system[_ -]?prompt|instructions?|messages?|content|completion[_ -]?input)\s*[:=]/i;
+
+registerValidator({
+  policyId: "no-env-in-prompts",
+  async check(ctx: ValidatorContext, options: Record<string, unknown>): Promise<ValidatorResult> {
+    const files = ctx.changedFiles ?? [];
+    if (files.length === 0) {
+      return { pass: true, severity: "info", message: "No changed files to scan" };
+    }
+
+    const allowlist = Array.isArray(options.allowlist_paths)
+      ? options.allowlist_paths.filter((p): p is string => typeof p === "string")
+      : ["tests/", "test/", "__tests__/", "fixtures/", "docs/"];
+
+    const hits: string[] = [];
+    let scanned = 0;
+
+    for (const file of files) {
+      if (allowlist.some((p) => file.includes(p))) continue;
+      if (!/\.(?:ts|tsx|js|mjs|cjs|jsx|py)$/i.test(file)) continue;
+
+      const abs = join(ctx.projectRoot, file);
+      try {
+        const content = readFileSync(abs, "utf8");
+        scanned += 1;
+        const lines = content.split("\n");
+
+        // Track a small rolling window so env access and prompt signal can live
+        // on adjacent lines (template literals spanning lines etc.).
+        const WINDOW = 3;
+        for (let i = 0; i < lines.length; i += 1) {
+          const windowStart = Math.max(0, i - WINDOW);
+          const windowEnd = Math.min(lines.length, i + WINDOW + 1);
+          const window = lines.slice(windowStart, windowEnd).join("\n");
+
+          const envMatch = ENV_ACCESS_RES.find((re) => re.test(lines[i]));
+          if (!envMatch) continue;
+
+          const looksLikePrompt = PROMPT_CONTEXT_RES.test(window) || PROMPT_VAR_NAMES_RES.test(window);
+          if (!looksLikePrompt) continue;
+
+          const envName = lines[i].match(envMatch)?.[0] ?? "env var";
+          hits.push(`${file}:${i + 1} — ${envName.trim()} used in prompt context`);
+        }
+      } catch {
+        // unreadable — skip
+      }
+    }
+
+    if (hits.length === 0) {
+      return {
+        pass: true,
+        severity: "info",
+        message: `No env-in-prompt patterns detected in ${scanned} changed file${scanned === 1 ? "" : "s"}`,
+      };
+    }
+
+    return {
+      pass: false,
+      severity: "error",
+      message: `${hits.length} env-in-prompt violation${hits.length === 1 ? "" : "s"} detected`,
+      detail: hits.slice(0, 20).join("\n") + (hits.length > 20 ? `\n... and ${hits.length - 20} more` : ""),
+    };
+  },
+});
+
 // ── helpers ──
 
 function formatBytes(bytes: number): string {
