@@ -4,6 +4,7 @@ import { registerValidator, type ValidatorContext, type ValidatorResult } from "
 // Side-effect imports: register generic evaluators (type-based dispatch)
 // alongside the name-based validators defined below.
 import "./evaluators/regex.js";
+import "./evaluators/code_comments.js";
 
 // ── max-file-size ──
 
