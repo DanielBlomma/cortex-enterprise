@@ -22,12 +22,139 @@ function cleanup(dir) {
 
 // --- engine ---
 
-test("builtins register 4 validators", () => {
+test("builtins register all core validators", () => {
   const ids = getRegisteredPolicyIds();
   assert.ok(ids.includes("max-file-size"));
   assert.ok(ids.includes("require-test-coverage"));
   assert.ok(ids.includes("no-external-api-calls"));
   assert.ok(ids.includes("require-code-review"));
+  assert.ok(ids.includes("no-secrets-in-code"));
+  assert.ok(ids.includes("no-env-in-prompts"));
+});
+
+test("engine reports warning for enforced policy with no registered validator", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const output = await runValidators(
+      new Set(["policy-that-does-not-exist"]),
+      { contextDir, projectRoot, changedFiles: [] },
+      {},
+    );
+    assert.equal(output.results.length, 1);
+    assert.equal(output.results[0].policy_id, "policy-that-does-not-exist");
+    assert.equal(output.results[0].pass, false);
+    assert.equal(output.results[0].severity, "warning");
+    assert.match(output.results[0].message, /No validator implementation/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("no-secrets-in-code detects AWS access key in JSON config", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(
+      path.join(projectRoot, "appsettings.Development.json"),
+      JSON.stringify({
+        AWS: { AccessKey: "AKIAIOSFODNN7EXAMPLE", Secret: "<redacted>" },
+        ConnectionStrings: { Default: "Server=.;Database=app;User=admin;Password=Sup3rSecret!;" },
+      }, null, 2),
+    );
+
+    const output = await runValidators(
+      new Set(["no-secrets-in-code"]),
+      { contextDir, projectRoot, changedFiles: ["appsettings.Development.json"] },
+      {},
+    );
+    const result = output.results[0];
+    assert.equal(result.pass, false);
+    assert.equal(result.severity, "error");
+    assert.match(result.detail ?? "", /AWS access key/);
+    assert.match(result.detail ?? "", /Connection string password/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("no-secrets-in-code scans .env files", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(
+      path.join(projectRoot, ".env.production"),
+      "API_KEY=\"ghp_1234567890abcdefghijklmnopqrstuvwxyz\"\nDEBUG=false\n",
+    );
+
+    const output = await runValidators(
+      new Set(["no-secrets-in-code"]),
+      { contextDir, projectRoot, changedFiles: [".env.production"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /GitHub PAT/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("no-secrets-in-code ignores obvious placeholders", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(
+      path.join(projectRoot, "config.json"),
+      JSON.stringify({ password: "<password>", apikey: "changeme" }, null, 2),
+    );
+
+    const output = await runValidators(
+      new Set(["no-secrets-in-code"]),
+      { contextDir, projectRoot, changedFiles: ["config.json"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("no-env-in-prompts detects env access inside prompt string", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(
+      path.join(projectRoot, "agent.ts"),
+      [
+        "const systemPrompt = `You are an assistant. Token: ${process.env.API_SECRET}`;",
+        "await llm.complete({ messages: [{ role: 'system', content: systemPrompt }] });",
+      ].join("\n"),
+    );
+
+    const output = await runValidators(
+      new Set(["no-env-in-prompts"]),
+      { contextDir, projectRoot, changedFiles: ["agent.ts"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /process\.env\.API_SECRET/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("no-env-in-prompts ignores env use outside prompt context", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(
+      path.join(projectRoot, "server.ts"),
+      "const port = Number(process.env.PORT) || 3000;\nconsole.log('listening', port);\n",
+    );
+
+    const output = await runValidators(
+      new Set(["no-env-in-prompts"]),
+      { contextDir, projectRoot, changedFiles: ["server.ts"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
 });
 
 test("runValidators skips non-enforced policies", async () => {
