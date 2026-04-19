@@ -354,13 +354,16 @@ export function registerEnterpriseTools(
         }
       }
 
-      // Build set of enforced policy IDs
+      // Build enforced policies list, carrying type + config so the
+      // engine can dispatch to generic evaluators for cortex-web custom
+      // rules. Predefined rules leave type/config null and route to the
+      // name-based validator registry.
       const policies = policyStore.getMergedPolicies();
-      const enforcedIds = new Set(
-        policies.filter((p) => p.enforce).map((p) => p.id),
-      );
+      const enforced = policies
+        .filter((p) => p.enforce)
+        .map((p) => ({ id: p.id, type: p.type ?? null, config: p.config ?? null }));
 
-      const output = await runValidators(enforcedIds, {
+      const output = await runValidators(enforced, {
         contextDir,
         projectRoot,
         changedFiles,

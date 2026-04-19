@@ -6,7 +6,11 @@ import path from "node:path";
 
 // Import builtins to register validators
 import "../dist/validators/builtins.js";
-import { runValidators, getRegisteredPolicyIds } from "../dist/validators/engine.js";
+import {
+  runValidators,
+  getRegisteredPolicyIds,
+  getRegisteredEvaluatorTypes,
+} from "../dist/validators/engine.js";
 import { parseValidatorsConfig } from "../dist/validators/config.js";
 
 function makeTempProject() {
@@ -369,4 +373,153 @@ test("parseValidatorsConfig extracts nested fields", () => {
 test("parseValidatorsConfig returns empty for no validators", () => {
   const config = parseValidatorsConfig({ "telemetry.enabled": "true" });
   assert.deepEqual(config, {});
+});
+
+// --- generic evaluator dispatcher (M2) ---
+
+test("builtins register regex evaluator type", () => {
+  const types = getRegisteredEvaluatorTypes();
+  assert.ok(types.includes("regex"));
+});
+
+test("runValidators dispatches to generic evaluator when policy has type", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(path.join(projectRoot, "app.ts"), "const x = 1; // FIXME: urgent\n");
+    const output = await runValidators(
+      [
+        {
+          id: "custom:no-fixme",
+          type: "regex",
+          config: {
+            pattern: "FIXME",
+            severity: "error",
+            message: "FIXME marker found",
+          },
+        },
+      ],
+      { contextDir, projectRoot, changedFiles: ["app.ts"] },
+      {},
+    );
+    assert.equal(output.results.length, 1);
+    assert.equal(output.results[0].policy_id, "custom:no-fixme");
+    assert.equal(output.results[0].pass, false);
+    assert.equal(output.results[0].severity, "error");
+    assert.match(output.results[0].message, /FIXME marker found/);
+    assert.match(output.results[0].detail ?? "", /app\.ts:1/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("regex evaluator respects file_pattern filter", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(path.join(projectRoot, "app.ts"), "TODO: refactor\n");
+    fs.writeFileSync(path.join(projectRoot, "README.md"), "TODO: document\n");
+    const output = await runValidators(
+      [
+        {
+          id: "custom:todo-in-code",
+          type: "regex",
+          config: {
+            pattern: "TODO",
+            file_pattern: "\\.ts$",
+          },
+        },
+      ],
+      { contextDir, projectRoot, changedFiles: ["app.ts", "README.md"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /app\.ts/);
+    assert.doesNotMatch(output.results[0].detail ?? "", /README\.md/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("regex evaluator passes when no changed files match pattern", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(path.join(projectRoot, "clean.ts"), "const ok = 1;\n");
+    const output = await runValidators(
+      [
+        { id: "custom:no-fixme", type: "regex", config: { pattern: "FIXME" } },
+      ],
+      { contextDir, projectRoot, changedFiles: ["clean.ts"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("regex evaluator errors on invalid regex config", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const output = await runValidators(
+      [
+        { id: "custom:broken", type: "regex", config: { pattern: "[unclosed" } },
+      ],
+      { contextDir, projectRoot, changedFiles: ["any.ts"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.equal(output.results[0].severity, "error");
+    assert.match(output.results[0].message, /Invalid regex config/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("engine warns when policy type has no registered evaluator", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const output = await runValidators(
+      [
+        { id: "custom:future", type: "some_future_type", config: {} },
+      ],
+      { contextDir, projectRoot, changedFiles: [] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.equal(output.results[0].severity, "warning");
+    assert.match(output.results[0].message, /No evaluator registered for type/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("engine falls back to name-based registry when policy has no type", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const output = await runValidators(
+      [{ id: "require-code-review" }],
+      { contextDir, projectRoot },
+      {},
+    );
+    // No review-status.json → require-code-review should fail with its own
+    // message, confirming dispatch went to the name-based validator.
+    assert.equal(output.results[0].policy_id, "require-code-review");
+    assert.equal(output.results[0].pass, false);
+    assert.doesNotMatch(output.results[0].message, /No validator implementation/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("runValidators accepts Set<string> for backcompat", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot },
+      {},
+    );
+    assert.equal(output.results[0].policy_id, "require-code-review");
+  } finally {
+    cleanup(projectRoot);
+  }
 });

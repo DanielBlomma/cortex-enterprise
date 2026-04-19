@@ -1,6 +1,9 @@
 import { statSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { registerValidator, type ValidatorContext, type ValidatorResult } from "./engine.js";
+// Side-effect imports: register generic evaluators (type-based dispatch)
+// alongside the name-based validators defined below.
+import "./evaluators/regex.js";
 
 // ── max-file-size ──
 
