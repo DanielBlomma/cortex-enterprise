@@ -523,3 +523,177 @@ test("runValidators accepts Set<string> for backcompat", async () => {
     cleanup(projectRoot);
   }
 });
+
+// --- code_comments evaluator (M3) ---
+
+test("builtins register code_comments evaluator type", () => {
+  const types = getRegisteredEvaluatorTypes();
+  assert.ok(types.includes("code_comments"));
+});
+
+async function runCodeComments(projectRoot, contextDir, filename, content, config = {}) {
+  fs.writeFileSync(path.join(projectRoot, filename), content);
+  return runValidators(
+    [{ id: "custom:code-comments", type: "code_comments", config: { min_lines: 6, ...config } }],
+    { contextDir, projectRoot, changedFiles: [filename] },
+    {},
+  );
+}
+
+const LONG_BODY = Array.from({ length: 8 }, (_, i) => `  const v${i} = ${i};`).join("\n");
+const LONG_BODY_PY = Array.from({ length: 8 }, (_, i) => `    v${i} = ${i}`).join("\n");
+
+test("code_comments flags undocumented long TypeScript function", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `function doWork() {\n${LONG_BODY}\n  return 0;\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.ts", content);
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /a\.ts:1 — doWork/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments passes when TypeScript function has leading comment", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `// computes the work\nfunction doWork() {\n${LONG_BODY}\n  return 0;\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.ts", content);
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments ignores short TypeScript function", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = "function tiny() {\n  return 1;\n}\n";
+    const output = await runCodeComments(projectRoot, contextDir, "a.ts", content);
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments flags undocumented long Python function", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `def do_work():\n${LONG_BODY_PY}\n    return 0\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.py", content);
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /a\.py:1 — do_work/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments accepts Python docstring as documentation", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `def do_work():\n    """Does work."""\n${LONG_BODY_PY}\n    return 0\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.py", content);
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments flags undocumented long Go function", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `func DoWork() int {\n${LONG_BODY}\n  return 0\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.go", content);
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /a\.go:1 — DoWork/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments passes commented Go function", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `// DoWork does the work.\nfunc DoWork() int {\n${LONG_BODY}\n  return 0\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.go", content);
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments flags undocumented long Rust function", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `pub fn do_work() -> i32 {\n${LONG_BODY}\n  0\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.rs", content);
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /a\.rs:1 — do_work/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments flags undocumented long C# method", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `public class Svc {\n  public int DoWork() {\n${LONG_BODY}\n    return 0;\n  }\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.cs", content);
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /a\.cs:2 — DoWork/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments passes C# method with /// doc comment", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `public class Svc {\n  /// <summary>Does the work.</summary>\n  public int DoWork() {\n${LONG_BODY}\n    return 0;\n  }\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.cs", content);
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments flags undocumented long Java method", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = `public class Svc {\n  public int doWork() {\n${LONG_BODY}\n    return 0;\n  }\n}\n`;
+    const output = await runCodeComments(projectRoot, contextDir, "a.java", content);
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].detail ?? "", /a\.java:2 — doWork/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments respects allowlist paths (tests/)", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.mkdirSync(path.join(projectRoot, "tests"), { recursive: true });
+    const content = `function doWork() {\n${LONG_BODY}\n  return 0;\n}\n`;
+    const output = await runCodeComments(
+      projectRoot,
+      contextDir,
+      "tests/helpers.ts",
+      content,
+    );
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("code_comments skips unsupported file extensions", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const content = "some content that would match loosely";
+    const output = await runCodeComments(projectRoot, contextDir, "a.md", content);
+    assert.equal(output.results[0].pass, true);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
