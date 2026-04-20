@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { walkProjectFiles } from "./walk.js";
 import type { EnterpriseConfig } from "@danielblomma/cortex-core/config";
 import type { TelemetryCollector } from "@danielblomma/cortex-core/telemetry/collector";
 import type { AuditWriter } from "@danielblomma/cortex-core/audit/writer";
@@ -338,20 +339,53 @@ export function registerEnterpriseTools(
 
       const projectRoot = process.env.CORTEX_PROJECT_ROOT?.trim() || process.cwd();
 
-      // Collect changed files via git
+      // Resolve the file set for this review.
+      //
+      // scope=changed (default): ask git for the diff. If the working copy
+      //   is not a git repo — or git otherwise fails — fall back to
+      //   walking the project so the review doesn't silently pass
+      //   everything with an empty file list (pre-0.9.1 regression).
+      //
+      // scope=all: always walk the project. Explicit opt-in for whole-
+      //   project review; no git dependency.
       let changedFiles: string[] | undefined;
       if (parsed.scope === "changed") {
+        // Use `git rev-parse --is-inside-work-tree` to distinguish
+        // "valid repo, nothing changed" (→ empty list, reviewer sees
+        // nothing to scan) from "not a repo / git broken" (→ walk the
+        // project so scope=changed still returns meaningful results
+        // when run outside a git checkout).
+        let inGitRepo = false;
         try {
           const { execSync } = await import("node:child_process");
-          const output = execSync("git diff --name-only HEAD 2>/dev/null || git diff --name-only", {
+          execSync("git rev-parse --is-inside-work-tree", {
             cwd: projectRoot,
             encoding: "utf8",
-            timeout: 5000,
+            timeout: 3000,
+            stdio: ["ignore", "pipe", "ignore"],
           });
-          changedFiles = output.split("\n").map((f) => f.trim()).filter(Boolean);
+          inGitRepo = true;
         } catch {
-          changedFiles = [];
+          inGitRepo = false;
         }
+
+        if (inGitRepo) {
+          try {
+            const { execSync } = await import("node:child_process");
+            const output = execSync("git diff --name-only HEAD 2>/dev/null || git diff --name-only", {
+              cwd: projectRoot,
+              encoding: "utf8",
+              timeout: 5000,
+            });
+            changedFiles = output.split("\n").map((f) => f.trim()).filter(Boolean);
+          } catch {
+            changedFiles = [];
+          }
+        } else {
+          changedFiles = walkProjectFiles(projectRoot);
+        }
+      } else {
+        changedFiles = walkProjectFiles(projectRoot);
       }
 
       // Build enforced policies list, carrying type + config so the
