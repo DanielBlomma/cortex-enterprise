@@ -10,6 +10,24 @@ export type TelemetryConfig = {
   interval_minutes: number;
 };
 
+export type EnterpriseServiceConfig = {
+  endpoint: string;
+  api_key: string;
+};
+
+export type EnterpriseActivation =
+  | { active: true; reason: "active"; endpoint: string; api_key: string }
+  | {
+      active: false;
+      reason:
+        | "missing_api_key"
+        | "missing_endpoint"
+        | "invalid_api_key_format"
+        | "invalid_endpoint_format";
+      endpoint: string | null;
+      api_key: string | null;
+    };
+
 export type AuditConfig = {
   enabled: boolean;
   retention_days: number;
@@ -23,6 +41,7 @@ export type PolicyConfig = {
 };
 
 export type EnterpriseConfig = {
+  enterprise: EnterpriseServiceConfig;
   telemetry: TelemetryConfig;
   audit: AuditConfig;
   policy: PolicyConfig;
@@ -31,6 +50,10 @@ export type EnterpriseConfig = {
 };
 
 const DEFAULTS: EnterpriseConfig = {
+  enterprise: {
+    endpoint: "",
+    api_key: "",
+  },
   telemetry: {
     enabled: false,
     endpoint: "",
@@ -101,6 +124,42 @@ function parseSimpleYaml(text: string): Record<string, string> {
   return result;
 }
 
+function isLikelyApiKey(value: string): boolean {
+  return /^(?:ctx|ent)_[A-Za-z0-9._-]{8,}$/.test(value);
+}
+
+function isLikelyHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function resolveEnterpriseActivation(config: EnterpriseConfig): EnterpriseActivation {
+  const apiKey = config.enterprise.api_key.trim();
+  const endpoint = config.enterprise.endpoint.trim();
+
+  if (!apiKey) {
+    return { active: false, reason: "missing_api_key", api_key: null, endpoint: endpoint || null };
+  }
+
+  if (!endpoint) {
+    return { active: false, reason: "missing_endpoint", api_key: apiKey, endpoint: null };
+  }
+
+  if (!isLikelyApiKey(apiKey)) {
+    return { active: false, reason: "invalid_api_key_format", api_key: apiKey, endpoint };
+  }
+
+  if (!isLikelyHttpUrl(endpoint)) {
+    return { active: false, reason: "invalid_endpoint_format", api_key: apiKey, endpoint };
+  }
+
+  return { active: true, reason: "active", api_key: apiKey, endpoint };
+}
+
 export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
   let raw: string;
   try {
@@ -114,14 +173,24 @@ export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
   }
 
   const fields = parseSimpleYaml(raw);
+  const enterpriseApiKey = fields["enterprise.api_key"] ?? DEFAULTS.enterprise.api_key;
+  const enterpriseEndpoint = fields["enterprise.endpoint"] ?? DEFAULTS.enterprise.endpoint;
+  const telemetryEndpoint = fields["telemetry.endpoint"] ?? DEFAULTS.telemetry.endpoint;
+  const telemetryApiKey = fields["telemetry.api_key"] ?? enterpriseApiKey;
+  const policyEndpoint = fields["policy.endpoint"] ?? DEFAULTS.policy.endpoint;
+  const policyApiKey = fields["policy.api_key"] ?? enterpriseApiKey;
 
   return {
+    enterprise: {
+      endpoint: enterpriseEndpoint,
+      api_key: enterpriseApiKey,
+    },
     telemetry: {
-      endpoint: fields["telemetry.endpoint"] ?? DEFAULTS.telemetry.endpoint,
-      api_key: fields["telemetry.api_key"] ?? DEFAULTS.telemetry.api_key,
+      endpoint: telemetryEndpoint,
+      api_key: telemetryApiKey,
       enabled: fields["telemetry.enabled"] !== undefined
         ? fields["telemetry.enabled"] === "true"
-        : !!(fields["telemetry.endpoint"] && fields["telemetry.api_key"]),
+        : !!(telemetryEndpoint && telemetryApiKey),
       interval_minutes: parseInt(fields["telemetry.interval_minutes"] ?? "", 10) || DEFAULTS.telemetry.interval_minutes,
     },
     audit: {
@@ -130,8 +199,8 @@ export function loadEnterpriseConfig(contextDir: string): EnterpriseConfig {
     },
     policy: {
       enabled: fields["policy.enabled"] !== "false",
-      endpoint: fields["policy.endpoint"] ?? DEFAULTS.policy.endpoint,
-      api_key: fields["policy.api_key"] ?? DEFAULTS.policy.api_key,
+      endpoint: policyEndpoint,
+      api_key: policyApiKey,
       sync_interval_minutes: parseInt(fields["policy.sync_interval_minutes"] ?? "", 10) || DEFAULTS.policy.sync_interval_minutes,
     },
     rbac: {

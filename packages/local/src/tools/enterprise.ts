@@ -11,6 +11,20 @@ import { getLastPush } from "../telemetry/sync.js";
 import { syncFromCloud, syncFromLocal, getLastSync } from "../policy/sync.js";
 import { queueViolation } from "../violations/push.js";
 import { queueReviewResult } from "../reviews/push.js";
+import { pushWorkflowSnapshot } from "../workflow/push.js";
+import { OUTBOUND_DATA_BOUNDARY } from "../privacy/boundary.js";
+import {
+  addWorkflowNote,
+  addWorkflowTodo,
+  approveWorkflow,
+  completeWorkflowTodo,
+  loadWorkflowState,
+  recordWorkflowReview,
+  recordWorkflowUpdate,
+  reviewWorkflowPlan,
+  setWorkflowPlan,
+  startWorkflowImplementation,
+} from "../workflow/state.js";
 import { queryAuditLog } from "@danielblomma/cortex-core/audit/query";
 import { checkAccess, getAccessDeniedMessage, type Role } from "@danielblomma/cortex-core/rbac/check";
 import { runValidators } from "@danielblomma/cortex-core/validators/engine";
@@ -38,6 +52,23 @@ function accessDenied(role: Role, action: string) {
     role,
     action,
   });
+}
+
+async function pushWorkflowStateIfConfigured(
+  config: EnterpriseConfig,
+  state: ReturnType<typeof loadWorkflowState>
+): Promise<void> {
+  if (!config.policy.endpoint || !config.policy.api_key) return;
+  const result = await pushWorkflowSnapshot(
+    config.policy.endpoint,
+    config.policy.api_key,
+    state
+  );
+  if (!result.success) {
+    process.stderr.write(
+      `[cortex-enterprise] Workflow snapshot push failed: ${result.error ?? "unknown error"}\n`
+    );
+  }
 }
 
 export function registerEnterpriseTools(
@@ -80,6 +111,9 @@ export function registerEnterpriseTools(
         entities_returned: [],
         rules_applied: [],
         duration_ms: 0,
+        event_type: "tool_call",
+        evidence_level: "diagnostic",
+        resource_type: "telemetry",
       });
 
       return buildToolResult({
@@ -88,6 +122,7 @@ export function registerEnterpriseTools(
         interval_minutes: config.telemetry.interval_minutes,
         metrics,
         last_push: lastPush,
+        boundary: OUTBOUND_DATA_BOUNDARY,
       });
     },
   );
@@ -101,6 +136,10 @@ export function registerEnterpriseTools(
         from: z.string().optional().describe("Start date (YYYY-MM-DD)"),
         to: z.string().optional().describe("End date (YYYY-MM-DD)"),
         tool: z.string().optional().describe("Filter by tool name"),
+        event_type: z.string().optional().describe("Filter by audit event type"),
+        evidence_level: z.string().optional().describe("Filter by evidence level"),
+        status: z.enum(["success", "error"]).optional().describe("Filter by status"),
+        session_id: z.string().optional().describe("Filter by session id"),
         limit: z.number().int().positive().max(500).default(50),
       }),
     },
@@ -113,6 +152,10 @@ export function registerEnterpriseTools(
         from: z.string().optional(),
         to: z.string().optional(),
         tool: z.string().optional(),
+        event_type: z.string().optional(),
+        evidence_level: z.string().optional(),
+        status: z.enum(["success", "error"]).optional(),
+        session_id: z.string().optional(),
         limit: z.number().int().positive().max(500).default(50),
       }).parse(input ?? {});
 
@@ -126,6 +169,9 @@ export function registerEnterpriseTools(
         entities_returned: [],
         rules_applied: [],
         duration_ms: 0,
+        event_type: "tool_call",
+        evidence_level: "diagnostic",
+        resource_type: "audit",
       });
 
       return buildToolResult({
@@ -167,6 +213,9 @@ export function registerEnterpriseTools(
         entities_returned: policies.map(p => p.id),
         rules_applied: [],
         duration_ms: 0,
+        event_type: "tool_call",
+        evidence_level: "diagnostic",
+        resource_type: "policy",
       });
 
       return buildToolResult({
@@ -210,6 +259,10 @@ export function registerEnterpriseTools(
         entities_returned: [],
         rules_applied: [],
         duration_ms: 0,
+        event_type: "policy_sync",
+        evidence_level: "required",
+        resource_type: "policy",
+        metadata: { synced: result.synced },
       });
 
       return buildToolResult(result as unknown as ToolPayload);
@@ -246,7 +299,395 @@ export function registerEnterpriseTools(
           local: policies.filter(p => p.source === "local").length,
           last_sync: lastSyncResult,
         },
+        workflow: loadWorkflowState(contextDir),
       });
+    },
+  );
+
+  // ── workflow.status ──
+  server.registerTool(
+    "workflow.status",
+    {
+      description:
+        "Return the governed workflow state persisted in .context/workflow/state.json.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.status")) {
+        return accessDenied(role, "workflow.status");
+      }
+
+      const state = loadWorkflowState(contextDir);
+      return buildToolResult(state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.plan ──
+  server.registerTool(
+    "workflow.plan",
+    {
+      description:
+        "Create or update the implementation plan. Resets approval until the plan is reviewed again.",
+      inputSchema: z.object({
+        title: z.string().min(1).max(200),
+        summary: z.string().min(1).max(5000),
+        tasks: z.array(z.string().min(1).max(500)).max(50).default([]),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.plan")) {
+        return accessDenied(role, "workflow.plan");
+      }
+
+      const parsed = z.object({
+        title: z.string().min(1).max(200),
+        summary: z.string().min(1).max(5000),
+        tasks: z.array(z.string().min(1).max(500)).max(50).default([]),
+      }).parse(input ?? {});
+
+      const state = setWorkflowPlan(contextDir, parsed);
+      await pushWorkflowStateIfConfigured(config, state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.plan",
+        input: parsed as Record<string, unknown>,
+        result_count: state.plan.tasks.length,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "workflow_transition",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          phase: state.phase,
+          plan_status: state.plan.status,
+        },
+      });
+
+      return buildToolResult(state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.review_plan ──
+  server.registerTool(
+    "workflow.review_plan",
+    {
+      description:
+        "Review and approve or reject the current plan before implementation starts.",
+      inputSchema: z.object({
+        approved: z.boolean(),
+        notes: z.string().max(5000).optional(),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.review_plan")) {
+        return accessDenied(role, "workflow.review_plan");
+      }
+
+      const parsed = z.object({
+        approved: z.boolean(),
+        notes: z.string().max(5000).optional(),
+      }).parse(input ?? {});
+
+      const result = reviewWorkflowPlan(contextDir, parsed);
+      if (!result.ok) {
+        return buildToolResult({
+          error: result.error,
+          workflow: result.state,
+        });
+      }
+
+      await pushWorkflowStateIfConfigured(config, result.state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.review_plan",
+        input: parsed as Record<string, unknown>,
+        result_count: 1,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "workflow_transition",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          approved: parsed.approved,
+          phase: result.state.phase,
+          plan_status: result.state.plan.status,
+        },
+      });
+
+      return buildToolResult(result.state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.start ──
+  server.registerTool(
+    "workflow.start",
+    {
+      description:
+        "Mark the workflow as actively implementing after the plan has been approved.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.start")) {
+        return accessDenied(role, "workflow.start");
+      }
+
+      const result = startWorkflowImplementation(contextDir);
+      if (!result.ok) {
+        return buildToolResult({
+          error: result.error,
+          workflow: result.state,
+        });
+      }
+
+      await pushWorkflowStateIfConfigured(config, result.state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.start",
+        input: {},
+        result_count: 1,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "workflow_transition",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          phase: result.state.phase,
+        },
+      });
+
+      return buildToolResult(result.state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.update ──
+  server.registerTool(
+    "workflow.update",
+    {
+      description:
+        "Record an implementation or iteration update without mutating the plan itself.",
+      inputSchema: z.object({
+        summary: z.string().min(1).max(5000),
+        phase: z.enum(["implementation", "iterating", "plan_review"]).optional(),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.update")) {
+        return accessDenied(role, "workflow.update");
+      }
+
+      const parsed = z.object({
+        summary: z.string().min(1).max(5000),
+        phase: z.enum(["implementation", "iterating", "plan_review"]).optional(),
+      }).parse(input ?? {});
+
+      const state = recordWorkflowUpdate(contextDir, parsed);
+      await pushWorkflowStateIfConfigured(config, state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.update",
+        input: parsed as Record<string, unknown>,
+        result_count: 1,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "workflow_transition",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          phase: state.phase,
+        },
+      });
+
+      return buildToolResult(state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.note ──
+  server.registerTool(
+    "workflow.note",
+    {
+      description: "Persist a durable workflow note in .context/workflow/state.json.",
+      inputSchema: z.object({
+        title: z.string().min(1).max(200),
+        details: z.string().min(1).max(5000),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.note")) {
+        return accessDenied(role, "workflow.note");
+      }
+
+      const parsed = z.object({
+        title: z.string().min(1).max(200),
+        details: z.string().min(1).max(5000),
+      }).parse(input ?? {});
+
+      const state = addWorkflowNote(contextDir, parsed);
+      await pushWorkflowStateIfConfigured(config, state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.note",
+        input: parsed as Record<string, unknown>,
+        result_count: state.notes.length,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "workflow_transition",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          note_count: state.notes.length,
+          phase: state.phase,
+        },
+      });
+
+      return buildToolResult(state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.todo ──
+  server.registerTool(
+    "workflow.todo",
+    {
+      description: "Add or complete workflow TODOs persisted in .context.",
+      inputSchema: z.object({
+        action: z.enum(["add", "complete"]),
+        id: z.number().int().positive().optional(),
+        title: z.string().min(1).max(200).optional(),
+        details: z.string().max(5000).optional(),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.todo")) {
+        return accessDenied(role, "workflow.todo");
+      }
+
+      const parsed = z.object({
+        action: z.enum(["add", "complete"]),
+        id: z.number().int().positive().optional(),
+        title: z.string().min(1).max(200).optional(),
+        details: z.string().max(5000).optional(),
+      }).parse(input ?? {});
+
+      if (parsed.action === "add") {
+        if (!parsed.title) {
+          return buildToolResult({ error: "title is required when action=add" });
+        }
+        const state = addWorkflowTodo(contextDir, {
+          title: parsed.title,
+          details: parsed.details,
+        });
+        await pushWorkflowStateIfConfigured(config, state);
+
+        auditWriter?.log({
+          timestamp: new Date().toISOString(),
+          tool: "workflow.todo",
+          input: parsed as Record<string, unknown>,
+          result_count: state.todos.length,
+          entities_returned: [],
+          rules_applied: [],
+          duration_ms: 0,
+          event_type: "workflow_transition",
+          evidence_level: "required",
+          resource_type: "workflow",
+          metadata: {
+            action: "add",
+            open_todos: state.todos.filter((todo) => todo.status === "open").length,
+          },
+        });
+
+        return buildToolResult(state as unknown as ToolPayload);
+      }
+
+      if (!parsed.id) {
+        return buildToolResult({ error: "id is required when action=complete" });
+      }
+
+      const result = completeWorkflowTodo(contextDir, parsed.id);
+      if (!result.ok) {
+        return buildToolResult({
+          error: result.error,
+          workflow: result.state,
+        });
+      }
+      await pushWorkflowStateIfConfigured(config, result.state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.todo",
+        input: parsed as Record<string, unknown>,
+        result_count: result.state.todos.length,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "workflow_transition",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          action: "complete",
+          completed_id: parsed.id,
+          open_todos: result.state.todos.filter((todo) => todo.status === "open").length,
+        },
+      });
+
+      return buildToolResult(result.state as unknown as ToolPayload);
+    },
+  );
+
+  // ── workflow.approve ──
+  server.registerTool(
+    "workflow.approve",
+    {
+      description:
+        "Approve the workflow only after the plan is approved and the latest code review passes.",
+      inputSchema: z.object({
+        notes: z.string().max(5000).optional(),
+      }),
+    },
+    async (input) => {
+      if (config.rbac.enabled && !checkAccess(role, "workflow.approve")) {
+        return accessDenied(role, "workflow.approve");
+      }
+
+      const parsed = z.object({
+        notes: z.string().max(5000).optional(),
+      }).parse(input ?? {});
+
+      const result = approveWorkflow(contextDir, parsed.notes);
+      if (!result.ok) {
+        return buildToolResult({
+          error: result.error,
+          workflow: result.state,
+        });
+      }
+
+      await pushWorkflowStateIfConfigured(config, result.state);
+
+      auditWriter?.log({
+        timestamp: new Date().toISOString(),
+        tool: "workflow.approve",
+        input: parsed as Record<string, unknown>,
+        result_count: 1,
+        entities_returned: [],
+        rules_applied: [],
+        duration_ms: 0,
+        event_type: "approval",
+        evidence_level: "required",
+        resource_type: "workflow",
+        metadata: {
+          approval_status: result.state.approval.status,
+        },
+      });
+
+      return buildToolResult(result.state as unknown as ToolPayload);
     },
   );
 
@@ -293,6 +734,14 @@ export function registerEnterpriseTools(
         entities_returned: [],
         rules_applied: rulesApplied,
         duration_ms: 0,
+        event_type: "security_scan",
+        evidence_level: result.allowed ? "diagnostic" : "required",
+        resource_type: "policy",
+        metadata: {
+          flagged: result.scan.flagged,
+          score: result.scan.score,
+          allowed: result.allowed,
+        },
       });
 
       return buildToolResult({
@@ -395,7 +844,12 @@ export function registerEnterpriseTools(
       const policies = policyStore.getMergedPolicies();
       const enforced = policies
         .filter((p) => p.enforce)
-        .map((p) => ({ id: p.id, type: p.type ?? null, config: p.config ?? null }));
+        .map((p) => ({
+          id: p.id,
+          type: p.type ?? null,
+          config: p.config ?? null,
+          severity: p.severity ?? "block",
+        }));
 
       const output = await runValidators(enforced, {
         contextDir,
@@ -438,12 +892,28 @@ export function registerEnterpriseTools(
         entities_returned: output.results.map((r) => r.policy_id),
         rules_applied: output.results.filter((r) => !r.pass).map((r) => r.policy_id),
         duration_ms: 0,
+        event_type: "review_result",
+        evidence_level: "required",
+        resource_type: "review",
+        metadata: {
+          scope: parsed.scope,
+          passed: output.summary.passed,
+          failed: output.summary.failed,
+          warnings: output.results.filter((r) => !r.pass && r.severity === "warning").length,
+        },
       });
+
+      const workflowState = recordWorkflowReview(contextDir, {
+        scope: parsed.scope,
+        output,
+      });
+      await pushWorkflowStateIfConfigured(config, workflowState);
 
       return buildToolResult({
         scope: parsed.scope,
         results,
         summary: output.summary,
+        workflow: workflowState,
       });
     },
   );

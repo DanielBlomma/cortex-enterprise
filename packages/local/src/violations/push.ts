@@ -14,6 +14,12 @@ type ViolationItem = {
   occurred_at: string;
 };
 
+export type ViolationPushContext = {
+  repo?: string;
+  instance_id?: string;
+  session_id?: string;
+};
+
 export type ViolationPushResult = {
   success: boolean;
   count: number;
@@ -21,6 +27,11 @@ export type ViolationPushResult = {
 };
 
 const pending: ViolationItem[] = [];
+let activeContext: ViolationPushContext = {};
+
+export function setViolationPushContext(context: ViolationPushContext): void {
+  activeContext = { ...context };
+}
 
 /**
  * Queue a violation for the next push.
@@ -60,7 +71,12 @@ export async function pushViolations(
         "Content-Type": "application/json",
         "Accept": "application/json",
       },
-      body: JSON.stringify({ violations: batch }),
+      body: JSON.stringify({
+        repo: activeContext.repo,
+        instance_id: activeContext.instance_id,
+        session_id: activeContext.session_id,
+        violations: batch,
+      }),
       signal: AbortSignal.timeout(10_000),
     });
 

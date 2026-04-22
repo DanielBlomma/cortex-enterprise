@@ -76,9 +76,9 @@ You write a rule once. It applies to every developer, every repo, every AI tool 
 - "The payments module requires senior review before AI changes"
 - "Always prioritize the official architecture documents over old code"
 
-### Usage analytics
+### Usage analytics and rollout health
 
-A dashboard that answers: Are our developers actually using AI effectively? How many tokens are we saving? Which repos have stale indexes? This is the data you need to justify the investment to leadership.
+A dashboard that answers: Are our developers actually using AI effectively? Which instances are stale? Are policies syncing? Are teams following the governed workflow and producing review evidence? This is the data you need to justify rollout to leadership and IT.
 
 ### Audit trail for compliance
 
@@ -98,13 +98,14 @@ Developers log in with their existing company credentials. No separate account n
 
 ## What the developer experiences
 
-Almost nothing changes. They install Cortex once (IT can automate this). After that:
+The AI tool stays the same, but the development process becomes explicit. They install Cortex once (IT can automate this). After that:
 
 - Their AI coding assistant gets better context, automatically
-- Organization rules are enforced without the developer needing to think about it
-- A small dashboard shows their personal usage stats
+- Organization rules are enforced consistently
+- Cortex gives them a plan, review, iterate, and approve loop before commit
+- The dashboard shows usage, policy health, and audit evidence
 
-No new workflows. No extra steps. It just works in the background.
+This is intentionally more structured than open-ended AI use. The goal is not invisible governance. The goal is governed AI development with evidence.
 
 ---
 
@@ -121,7 +122,7 @@ No new workflows. No extra steps. It just works in the background.
 
 **~$30 per developer per month**
 
-Includes the cloud dashboard, rule management, analytics, audit trail, single sign-on, and priority support.
+Includes the cloud dashboard, policy management, governed workflow, analytics, audit trail, compliance reporting, single sign-on, and priority support.
 
 ---
 

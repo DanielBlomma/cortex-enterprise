@@ -30,7 +30,7 @@ Cortex Community solves the context quality problem for individual developers. E
 | **Platform Lead** | Manages developer tooling for 50-500 devs | Wants to roll out AI agents safely with guardrails and ROI tracking |
 | **Security/Compliance Officer** | Enforces SOC2, ISO 27001, internal policies | Needs audit trails proving AI agents were governed by rules |
 | **Engineering Manager** | Owns 5-20 repos with a team of 10-30 devs | Wants org-wide architectural consistency enforced automatically |
-| **Developer (air-gapped)** | Works in restricted environment (bank, defense) | Needs full Cortex functionality with zero internet dependency |
+| **Developer** | Uses AI coding tools in a governed enterprise setup | Wants enterprise features to activate cleanly without breaking normal workflows |
 
 ### Secondary Personas
 
@@ -41,9 +41,9 @@ Cortex Community solves the context quality problem for individual developers. E
 
 ---
 
-## 3. Product Editions
+## 3. Product Model
 
-### 3.1 Enterprise Connected
+### 3.1 Enterprise
 
 **For:** Organizations with internet access that want centralized governance.
 
@@ -61,6 +61,7 @@ Cortex Community solves the context quality problem for individual developers. E
 | EC-08 | Freshness Alerts | P2 | Slack/email notification when a repo's index goes stale |
 | EC-09 | Managed Embeddings API | P3 | GPU-backed embedding service for faster/better models |
 | EC-10 | Integrations | P3 | Datadog, Grafana, Slack, PagerDuty webhooks |
+| EC-11 | API Key Activation | P0 | Enterprise features activate only when a valid API key is configured and accepted by Cortex Cloud |
 
 #### Data Flow
 
@@ -80,22 +81,6 @@ Developer's machine                    Cortex Cloud
 NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 ```
 
-### 3.2 Enterprise Air-gapped
-
-**For:** Organizations where no data may leave the network.
-
-#### Features
-
-| ID | Feature | Priority | Description |
-|---|---|---|---|
-| EA-01 | Bundled Embedding Model | P0 | Embedding model shipped inside the package, no HuggingFace download |
-| EA-02 | Local Policy Files | P0 | Rules distributed as files (git, USB, internal portal), not via API |
-| EA-03 | Tarball Distribution | P0 | `.tgz` package installable without npm registry access |
-| EA-04 | Docker Image | P1 | Pre-built Docker image with all dependencies for air-gapped install |
-| EA-05 | Local Audit Log | P1 | Audit log written to local files, exportable for compliance review |
-| EA-06 | Local Operations Dashboard | P2 | Local dashboard showing usage, policies, and audit health |
-| EA-07 | Offline Update Mechanism | P3 | Delta-update packages for patching without full reinstall |
-
 ---
 
 ## 4. Functional Requirements
@@ -110,7 +95,16 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 | FR-04 | Dashboard shows `[Community]` or `[Enterprise]` in header | Done |
 | FR-05 | Type declarations allow enterprise to import core types | Done |
 
-### 4.2 Telemetry (Connected Only)
+### 4.2 Activation and Entitlement
+
+| ID | Requirement | Status |
+|---|---|---|
+| FR-10 | Enterprise plugin remains inert unless `enterprise.api_key` and `enterprise.endpoint` are configured | Planned |
+| FR-11 | Startup validates API key against Cortex Cloud before enabling enterprise features | Planned |
+| FR-12 | If validation fails, no enterprise tools, timers, audit, telemetry, or policy sync are started | Planned |
+| FR-13 | `enterprise.status` exposes active/inactive state and inactive reason | Planned |
+
+### 4.3 Telemetry
 
 | ID | Requirement | Status |
 |---|---|---|
@@ -120,27 +114,27 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 | FR-23 | Never send: source code, embeddings, search queries, file contents | Planned |
 | FR-24 | Expose `telemetry.status` MCP tool showing what is being sent | Planned |
 
-### 4.3 Policy Sync (Connected Only)
+### 4.4 Policy Sync
 
 | ID | Requirement | Status |
 |---|---|---|
 | FR-30 | Pull org-wide rules from Cortex Cloud API | Planned |
 | FR-31 | Merge org rules with local `.context/rules.yaml` (org rules take priority) | Planned |
 | FR-32 | Sync interval configurable (default: on startup + every 4 hours) | Planned |
-| FR-33 | Offline fallback: use last-synced rules if API unreachable | Planned |
+| FR-33 | If API unreachable, keep enterprise inactive or continue from previously validated active state based on cache policy | Planned |
 | FR-34 | Expose `policy.sync` MCP tool for manual sync | Planned |
 
-### 4.4 Audit Log
+### 4.5 Audit Log
 
 | ID | Requirement | Status |
 |---|---|---|
 | FR-40 | Log every MCP tool call: timestamp, tool name, input params, result summary | Planned |
 | FR-41 | Log which rules were applied to search results | Planned |
 | FR-42 | Store in `.context/audit/` as daily JSONL files | Planned |
-| FR-43 | Connected: optionally push audit events to Cortex Cloud | Planned |
+| FR-43 | Optionally push audit events to Cortex Cloud | Planned |
 | FR-44 | Expose `audit.query` MCP tool for searching audit history | Planned |
 
-### 4.5 Enterprise MCP Tools
+### 4.6 Enterprise MCP Tools
 
 | ID | Tool Name | Description | Status |
 |---|---|---|---|
@@ -162,7 +156,7 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 | NFR-04 | Zero source code leakage | No file contents, embeddings, or graph data sent externally |
 | NFR-05 | Graceful degradation | If any enterprise feature fails, fall back to community silently |
 | NFR-06 | No breaking changes to community | Enterprise plugin must never alter community tool behavior |
-| NFR-07 | Air-gapped: zero network calls | Verified by running with network disabled |
+| NFR-07 | Fail-closed activation | Enterprise features never activate without validated API key entitlement |
 
 ---
 
@@ -170,15 +164,16 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 
 ### Phase 1: Foundation (Target: v0.1.0)
 
-**Goal:** Enterprise plugin loads and enterprise tooling is available.
+**Goal:** Enterprise plugin loads safely and only activates for entitled customers.
 
 - [x] Plugin loader in public Cortex
 - [x] Enterprise package scaffolding
 - [x] Edition detection in dashboard
-- [ ] `enterprise.status` MCP tool
-- [ ] Bundled embedding model for air-gapped delivery
+- [ ] API-key activation gate
+- [ ] Startup entitlement validation
+- [ ] `enterprise.status` MCP tool with active/inactive reason
 
-**Exit criteria:** Customer can install enterprise package and see "Enterprise" in dashboard.
+**Exit criteria:** Customer with valid API key can activate enterprise; customers without entitlement stay in inert community-safe mode.
 
 ### Phase 2: Observability (Target: v0.2.0)
 
@@ -198,7 +193,6 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 **Goal:** Organizations can enforce rules across all repos.
 
 - [ ] Policy sync from cloud API (connected)
-- [ ] Local policy files (air-gapped)
 - [ ] Org-rule merge with local rules
 - [ ] `policy.sync` and `policy.list` MCP tools
 - [ ] RBAC foundation (admin vs developer)
@@ -238,7 +232,7 @@ NEVER sent: source code, embeddings, graph data, search queries (unless opt-in)
 |---|---|---|
 | MCP protocol changes | Enterprise tools break | Pin MCP SDK version, test against new releases before updating |
 | Low adoption of enterprise features | No revenue | Start with free pilots, prove ROI before charging |
-| Cloud API becomes bottleneck | Connected edition unreliable | All enterprise features work offline; cloud is enhancement, not dependency |
+| Cloud API becomes bottleneck | Activation or sync feels unreliable | Cache successful activation briefly, retry cleanly, and keep community mode unaffected when enterprise validation fails |
 | Competition from GitHub/JetBrains | They build similar governance | Move fast; own "AI Agent Governance" category before incumbents |
 
 ---

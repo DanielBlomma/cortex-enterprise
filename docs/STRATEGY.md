@@ -15,9 +15,9 @@ Core (public, MIT) remains free. Enterprise is a paid plugin layer.
 
 ---
 
-## Two Editions
+## Enterprise Edition
 
-### Edition 1: Connected
+### Connected
 
 **Target:** Tech companies, consultancies, SaaS — want oversight and governance.
 
@@ -42,46 +42,9 @@ Core (public, MIT) remains free. Enterprise is a paid plugin layer.
 
 **NEVER sent up:** Source code, search queries (opt-in only), embeddings, graph data.
 
-**Access model:** npm auth token for GitHub Packages.
+**Access model:** install the enterprise package, then activate it with an API key issued from Cortex Cloud.
 
 **Pricing:** ~$30/dev/month.
-
-### Edition 2: Air-gapped
-
-**Target:** Banks, defense, government, healthcare — zero internet, zero compromise.
-
-```
-┌─────────────────────────────────┐
-│  Developer machine (offline)    │
-│                                 │
-│  ┌──────────────────────────┐   │
-│  │  Cortex (local)          │   │
-│  │  ├── Ingest              │   │
-│  │  ├── Embeddings (bundled)│   │
-│  │  ├── Graph               │   │
-│  │  ├── MCP Server          │   │
-│  │  └── Dashboard           │   │
-│  └──────────────────────────┘   │
-│                                 │
-│  🚫 No network traffic         │
-└─────────────────────────────────┘
-```
-
-**Delivery:** Pre-packaged npm tarball with bundled embedding model. Or Docker image for offline load.
-
-**Pricing:** ~$50-200k/year (annual enterprise subscription).
-
-### Comparison
-
-| | Connected | Air-gapped |
-|---|---|---|
-| Internet | Yes (minimal) | No |
-| Auth | SSO/SAML via web | Local/offline operation |
-| Rules | Central push | Local per repo |
-| Analytics | Aggregated dashboard | Local dashboard only |
-| Updates | Auto-update | Manual delivery |
-| Pricing | Per seat/month | Annual enterprise subscription |
-| Typical customer | 50-500 devs, SaaS | Bank, defense, healthcare |
 
 ---
 
@@ -115,6 +78,8 @@ Core (public, MIT) remains free. Enterprise is a paid plugin layer.
 
 ### Phase 1 — Foundation (1-2 months)
 
+- Enterprise activation gate (`api_key` + endpoint required)
+- Entitlement validation API
 - Auth layer (API keys → SSO/SAML)
 - Telemetry module (opt-in usage tracking)
 - REST/gRPC API wrapper around MCP tools

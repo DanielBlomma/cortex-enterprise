@@ -78,7 +78,8 @@ export function buildViolationPayload(
   occurred_at: string;
 } {
   const topMatch = matches[0];
-  const message = `Prompt injection detected: ${topMatch.category} — "${topMatch.matched}" (score ${matches.reduce((s, m) => s + m.weight, 0).toFixed(2)})`;
+  const score = matches.reduce((s, m) => s + m.weight, 0).toFixed(2);
+  const message = `Prompt injection detected: ${topMatch.category} (score ${score})`;
 
   return {
     rule_id: RULE_ID,
@@ -86,7 +87,8 @@ export function buildViolationPayload(
     message: message.slice(0, 2000),
     file_path: context.filePath?.slice(0, 500),
     metadata: JSON.stringify({
-      query: context.query,
+      query_present: Boolean(context.query),
+      query_length: context.query?.length ?? 0,
       match_count: matches.length,
       categories: [...new Set(matches.map((m) => m.category))],
       patterns: matches.map((m) => m.pattern),

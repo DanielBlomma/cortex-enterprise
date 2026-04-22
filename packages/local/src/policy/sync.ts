@@ -3,6 +3,10 @@ import type { OrgPolicy, PolicyStore } from "@danielblomma/cortex-core/policy/st
 
 const CloudPolicySchema = z.object({
   id: z.string().min(1).max(200),
+  title: z.string().min(1).max(200).optional(),
+  kind: z.enum(["predefined", "custom"]).optional(),
+  status: z.enum(["draft", "active", "disabled", "archived"]).optional(),
+  severity: z.enum(["info", "warning", "error", "block"]).optional(),
   description: z.string().max(1000).default(""),
   priority: z.number().int().min(0).max(1000).default(50),
   scope: z.string().max(200).default("global"),
@@ -25,6 +29,11 @@ export type SyncResult = {
 
 let lastSync: SyncResult | null = null;
 
+export type SyncContext = {
+  instance_id?: string;
+  session_id?: string;
+};
+
 export function getLastSync(): SyncResult | null {
   return lastSync;
 }
@@ -38,6 +47,7 @@ export async function syncFromCloud(
   endpoint: string,
   apiKey: string,
   store: PolicyStore,
+  context: SyncContext = {},
 ): Promise<SyncResult> {
   if (!endpoint || !apiKey) {
     const result: SyncResult = {
@@ -57,6 +67,12 @@ export async function syncFromCloud(
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Accept": "application/json",
+        ...(context.instance_id
+          ? { "x-cortex-instance-id": context.instance_id }
+          : {}),
+        ...(context.session_id
+          ? { "x-cortex-session-id": context.session_id }
+          : {}),
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -77,6 +93,10 @@ export async function syncFromCloud(
     const data = CloudResponseSchema.parse(raw);
     const policies: OrgPolicy[] = data.rules.map((r) => ({
       id: r.id,
+      title: r.title ?? r.id,
+      kind: r.kind ?? null,
+      status: r.status ?? "active",
+      severity: r.severity ?? "block",
       description: r.description,
       priority: r.priority,
       scope: r.scope,

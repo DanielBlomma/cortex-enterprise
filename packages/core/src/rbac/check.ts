@@ -16,9 +16,17 @@ const PERMISSIONS: Record<string, Role[]> = {
   "policy.list":           ["admin", "developer"],
   "telemetry.status":      ["admin", "developer"],
   "context.review":        ["admin", "developer"],
+  "workflow.plan":         ["admin", "developer"],
+  "workflow.review_plan":  ["admin", "developer"],
+  "workflow.start":        ["admin", "developer"],
+  "workflow.update":       ["admin", "developer"],
+  "workflow.note":         ["admin", "developer"],
+  "workflow.todo":         ["admin", "developer"],
+  "workflow.approve":      ["admin", "developer"],
 
   // All roles
   "enterprise.status":     ["admin", "developer", "readonly"],
+  "workflow.status":       ["admin", "developer", "readonly"],
 };
 
 export function checkAccess(role: Role, action: string): boolean {

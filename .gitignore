@@ -11,6 +11,7 @@ packages/*/node_modules/
 .context/cache/
 .context/plan/
 .context/hooks/
+.context/enterprise.yaml
 .npm-cache/
 mcp/.npm-cache/
 mcp/dist/

@@ -5,8 +5,10 @@ import { checkAccess, getAccessDeniedMessage } from "../dist/rbac/check.js";
 test("admin can access all actions", () => {
   const actions = [
     "policy.write", "policy.sync", "telemetry.configure",
-    "audit.query", "policy.list", "telemetry.status",
-    "enterprise.status",
+    "audit.query", "policy.list", "telemetry.status", "context.review",
+    "workflow.plan", "workflow.review_plan", "workflow.start",
+    "workflow.update", "workflow.note", "workflow.todo", "workflow.approve",
+    "enterprise.status", "workflow.status",
   ];
   for (const action of actions) {
     assert.equal(checkAccess("admin", action), true, `admin should access ${action}`);
@@ -14,7 +16,12 @@ test("admin can access all actions", () => {
 });
 
 test("developer can access developer+all actions", () => {
-  const allowed = ["audit.query", "policy.list", "telemetry.status", "enterprise.status"];
+  const allowed = [
+    "audit.query", "policy.list", "telemetry.status", "context.review",
+    "workflow.plan", "workflow.review_plan", "workflow.start",
+    "workflow.update", "workflow.note", "workflow.todo", "workflow.approve",
+    "enterprise.status", "workflow.status",
+  ];
   for (const action of allowed) {
     assert.equal(checkAccess("developer", action), true, `developer should access ${action}`);
   }
@@ -28,10 +35,12 @@ test("developer cannot access admin-only actions", () => {
 });
 
 test("readonly can only access all-role actions", () => {
-  const allowed = ["enterprise.status"];
+  const allowed = ["enterprise.status", "workflow.status"];
   const denied = [
     "policy.write", "policy.sync", "telemetry.configure",
-    "audit.query", "policy.list", "telemetry.status",
+    "audit.query", "policy.list", "telemetry.status", "context.review",
+    "workflow.plan", "workflow.review_plan", "workflow.start",
+    "workflow.update", "workflow.note", "workflow.todo", "workflow.approve",
   ];
   for (const action of allowed) {
     assert.equal(checkAccess("readonly", action), true, `readonly should access ${action}`);

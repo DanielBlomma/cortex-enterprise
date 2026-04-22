@@ -7,6 +7,12 @@ export type ReviewPushItem = {
   reviewed_at: string;
 };
 
+export type ReviewPushContext = {
+  repo?: string;
+  instance_id?: string;
+  session_id?: string;
+};
+
 export type ReviewPushResult = {
   success: boolean;
   count: number;
@@ -14,6 +20,11 @@ export type ReviewPushResult = {
 };
 
 const pending: ReviewPushItem[] = [];
+let activeContext: ReviewPushContext = {};
+
+export function setReviewPushContext(context: ReviewPushContext): void {
+  activeContext = { ...context };
+}
 
 export function queueReviewResult(item: ReviewPushItem): void {
   pending.push(item);
@@ -42,7 +53,12 @@ export async function pushReviewResults(
         "Content-Type": "application/json",
         "Accept": "application/json",
       },
-      body: JSON.stringify({ reviews: batch }),
+      body: JSON.stringify({
+        repo: activeContext.repo,
+        instance_id: activeContext.instance_id,
+        session_id: activeContext.session_id,
+        reviews: batch,
+      }),
       signal: AbortSignal.timeout(10_000),
     });
 

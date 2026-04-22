@@ -192,6 +192,24 @@ test("runValidators returns correct summary", async () => {
   }
 });
 
+test("runValidators respects configured severity for predefined policies", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    fs.writeFileSync(path.join(projectRoot, "big.ts"), "x".repeat(2000));
+    const output = await runValidators(
+      [{ id: "max-file-size", severity: "block" }],
+      { contextDir, projectRoot, changedFiles: ["big.ts"] },
+      { "max-file-size": { max_bytes: 1000 } },
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.equal(output.results[0].severity, "error");
+    assert.equal(output.summary.failed, 1);
+    assert.equal(output.summary.warnings, 0);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
 // --- max-file-size ---
 
 test("max-file-size passes when all files under limit", async () => {

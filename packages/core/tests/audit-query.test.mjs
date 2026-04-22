@@ -15,8 +15,17 @@ function makeTempContext(files = {}) {
   return dir;
 }
 
-function entry(tool, timestamp) {
-  return JSON.stringify({ timestamp, tool, input: {}, result_count: 1, entities_returned: [], rules_applied: [], duration_ms: 10 });
+function entry(tool, timestamp, overrides = {}) {
+  return JSON.stringify({
+    timestamp,
+    tool,
+    input: {},
+    result_count: 1,
+    entities_returned: [],
+    rules_applied: [],
+    duration_ms: 10,
+    ...overrides,
+  });
 }
 
 test("returns empty when audit dir missing", () => {
@@ -69,6 +78,48 @@ test("filters by tool name", () => {
   });
   const results = queryAuditLog(dir, { tool: "context.search" });
   assert.equal(results.length, 2);
+});
+
+test("filters by event type and evidence level", () => {
+  const dir = makeTempContext({
+    "2025-06-15.jsonl": [
+      entry("workflow.plan", "2025-06-15T10:00:00Z", {
+        event_type: "workflow_transition",
+        evidence_level: "required",
+      }),
+      entry("context.search", "2025-06-15T11:00:00Z", {
+        event_type: "tool_call",
+        evidence_level: "diagnostic",
+      }),
+    ].join("\n"),
+  });
+  const results = queryAuditLog(dir, {
+    event_type: "workflow_transition",
+    evidence_level: "required",
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].tool, "workflow.plan");
+});
+
+test("filters by status and session id", () => {
+  const dir = makeTempContext({
+    "2025-06-15.jsonl": [
+      entry("context.search", "2025-06-15T10:00:00Z", {
+        status: "success",
+        session_id: "session-a",
+      }),
+      entry("context.search", "2025-06-15T11:00:00Z", {
+        status: "error",
+        session_id: "session-b",
+      }),
+    ].join("\n"),
+  });
+  const results = queryAuditLog(dir, {
+    status: "error",
+    session_id: "session-b",
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].status, "error");
 });
 
 test("respects limit", () => {

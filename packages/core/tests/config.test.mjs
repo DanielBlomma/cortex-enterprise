@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadEnterpriseConfig } from "../dist/config.js";
+import { loadEnterpriseConfig, resolveEnterpriseActivation } from "../dist/config.js";
 
 function makeTempContext(yaml) {
   const dir = mkdtempSync(join(tmpdir(), "cortex-config-"));
@@ -20,6 +20,8 @@ test("returns defaults when config file is missing", () => {
   assert.equal(config.telemetry.enabled, false);
   assert.equal(config.telemetry.endpoint, "");
   assert.equal(config.telemetry.interval_minutes, 10);
+  assert.equal(config.enterprise.endpoint, "");
+  assert.equal(config.enterprise.api_key, "");
   assert.equal(config.audit.enabled, true);
   assert.equal(config.audit.retention_days, 90);
   assert.equal(config.policy.enabled, true);
@@ -28,7 +30,10 @@ test("returns defaults when config file is missing", () => {
 });
 
 test("parses complete config file", () => {
-  const yaml = `telemetry:
+  const yaml = `enterprise:
+  endpoint: https://enterprise.example.com
+  api_key: ent_abc123456789
+telemetry:
   enabled: true
   endpoint: https://telemetry.example.com
   api_key: tok_abc123
@@ -48,6 +53,8 @@ rbac:
   const dir = makeTempContext(yaml);
   const config = loadEnterpriseConfig(dir);
 
+  assert.equal(config.enterprise.endpoint, "https://enterprise.example.com");
+  assert.equal(config.enterprise.api_key, "ent_abc123456789");
   assert.equal(config.telemetry.enabled, true);
   assert.equal(config.telemetry.endpoint, "https://telemetry.example.com");
   assert.equal(config.telemetry.api_key, "tok_abc123");
@@ -147,4 +154,71 @@ test("quoted values with inline comments", () => {
 `;
   const config = loadEnterpriseConfig(makeTempContext(yaml));
   assert.equal(config.telemetry.endpoint, "https://example.com");
+});
+
+test("telemetry and policy api keys fall back to enterprise api key", () => {
+  const yaml = `enterprise:
+  endpoint: https://enterprise.example.com
+  api_key: ctx_Abcdef1234567890
+telemetry:
+  endpoint: https://telemetry.example.com
+policy:
+  endpoint: https://policy.example.com
+`;
+  const config = loadEnterpriseConfig(makeTempContext(yaml));
+  assert.equal(config.telemetry.api_key, "ctx_Abcdef1234567890");
+  assert.equal(config.policy.api_key, "ctx_Abcdef1234567890");
+});
+
+test("telemetry auto-enables when endpoint is present and api key is inherited from enterprise", () => {
+  const yaml = `enterprise:
+  api_key: ctx_Abcdef1234567890
+telemetry:
+  endpoint: https://telemetry.example.com
+`;
+  const config = loadEnterpriseConfig(makeTempContext(yaml));
+  assert.equal(config.telemetry.enabled, true);
+});
+
+test("resolveEnterpriseActivation returns inactive when api key is missing", () => {
+  const activation = resolveEnterpriseActivation(loadEnterpriseConfig(makeTempContext(`enterprise:
+  endpoint: https://enterprise.example.com
+`)));
+  assert.equal(activation.active, false);
+  assert.equal(activation.reason, "missing_api_key");
+});
+
+test("resolveEnterpriseActivation returns inactive when endpoint is missing", () => {
+  const activation = resolveEnterpriseActivation(loadEnterpriseConfig(makeTempContext(`enterprise:
+  api_key: ctx_Abcdef1234567890
+`)));
+  assert.equal(activation.active, false);
+  assert.equal(activation.reason, "missing_endpoint");
+});
+
+test("resolveEnterpriseActivation rejects malformed api keys", () => {
+  const activation = resolveEnterpriseActivation(loadEnterpriseConfig(makeTempContext(`enterprise:
+  endpoint: https://enterprise.example.com
+  api_key: not a valid key
+`)));
+  assert.equal(activation.active, false);
+  assert.equal(activation.reason, "invalid_api_key_format");
+});
+
+test("resolveEnterpriseActivation accepts explicit enterprise config", () => {
+  const activation = resolveEnterpriseActivation(loadEnterpriseConfig(makeTempContext(`enterprise:
+  endpoint: https://enterprise.example.com
+  api_key: ent_Abcdef1234567890
+`)));
+  assert.equal(activation.active, true);
+  assert.equal(activation.reason, "active");
+});
+
+test("resolveEnterpriseActivation requires explicit enterprise config", () => {
+  const activation = resolveEnterpriseActivation(loadEnterpriseConfig(makeTempContext(`policy:
+  endpoint: https://policy.example.com
+  api_key: ctx_Abcdef1234567890
+`)));
+  assert.equal(activation.active, false);
+  assert.equal(activation.reason, "missing_api_key");
 });

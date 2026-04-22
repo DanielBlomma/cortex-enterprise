@@ -3,6 +3,10 @@ import { join } from "node:path";
 
 export type OrgPolicy = {
   id: string;
+  title?: string | null;
+  kind?: "predefined" | "custom" | null;
+  status?: "draft" | "active" | "disabled" | "archived" | null;
+  severity?: "info" | "warning" | "error" | "block" | null;
   description: string;
   priority: number;
   scope: string;
@@ -41,7 +45,22 @@ function parseRulesYaml(text: string, source: "org" | "local"): OrgPolicy[] {
 
     if (!current) continue;
 
-    if (trimmed.startsWith("description:")) {
+    if (trimmed.startsWith("title:")) {
+      current.title = trimmed.slice(6).trim().replace(/^["']|["']$/g, "");
+    } else if (trimmed.startsWith("kind:")) {
+      const kind = trimmed.slice(5).trim();
+      if (kind === "predefined" || kind === "custom") current.kind = kind;
+    } else if (trimmed.startsWith("status:")) {
+      const status = trimmed.slice(7).trim();
+      if (status === "draft" || status === "active" || status === "disabled" || status === "archived") {
+        current.status = status;
+      }
+    } else if (trimmed.startsWith("severity:")) {
+      const severity = trimmed.slice(9).trim();
+      if (severity === "info" || severity === "warning" || severity === "error" || severity === "block") {
+        current.severity = severity;
+      }
+    } else if (trimmed.startsWith("description:")) {
       current.description = trimmed.slice(12).trim().replace(/^["']|["']$/g, "");
     } else if (trimmed.startsWith("priority:")) {
       current.priority = parseInt(trimmed.slice(9).trim(), 10) || 50;
@@ -81,6 +100,10 @@ function parseRulesYaml(text: string, source: "org" | "local"): OrgPolicy[] {
 function finalize(partial: Partial<OrgPolicy>, source: "org" | "local"): OrgPolicy {
   return {
     id: partial.id ?? "",
+    title: partial.title ?? partial.id ?? "",
+    kind: partial.kind ?? null,
+    status: partial.status ?? "active",
+    severity: partial.severity ?? "block",
     description: partial.description ?? "",
     priority: partial.priority ?? 50,
     scope: partial.scope ?? "global",
@@ -95,6 +118,10 @@ function policiesToYaml(policies: OrgPolicy[]): string {
   const lines = ["rules:"];
   for (const p of policies) {
     lines.push(`  - id: ${p.id}`);
+    if (p.title) lines.push(`    title: "${p.title.replace(/"/g, '\\"')}"`);
+    if (p.kind) lines.push(`    kind: ${p.kind}`);
+    if (p.status) lines.push(`    status: ${p.status}`);
+    if (p.severity) lines.push(`    severity: ${p.severity}`);
     lines.push(`    description: "${p.description.replace(/"/g, '\\"')}"`);
     lines.push(`    priority: ${p.priority}`);
     lines.push(`    scope: ${p.scope}`);

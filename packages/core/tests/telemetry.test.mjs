@@ -15,6 +15,9 @@ test("new collector starts with zero metrics", () => {
   const m = c.getMetrics();
 
   assert.equal(m.searches, 0);
+  assert.equal(m.total_tool_calls, 0);
+  assert.equal(m.successful_tool_calls, 0);
+  assert.equal(m.failed_tool_calls, 0);
   assert.equal(m.related_lookups, 0);
   assert.equal(m.rule_lookups, 0);
   assert.equal(m.reloads, 0);
@@ -33,12 +36,16 @@ test("record increments correct counters", () => {
   c.record("context.reload", 0, 0);
 
   const m = c.getMetrics();
+  assert.equal(m.total_tool_calls, 5);
+  assert.equal(m.successful_tool_calls, 5);
+  assert.equal(m.failed_tool_calls, 0);
   assert.equal(m.searches, 2);
   assert.equal(m.related_lookups, 1);
   assert.equal(m.rule_lookups, 1);
   assert.equal(m.reloads, 1);
   assert.equal(m.total_results_returned, 11);
   assert.equal(m.estimated_tokens_saved, 190);
+  assert.equal(m.tool_metrics["context.search"].calls, 2);
 });
 
 test("unknown tool name does not crash", () => {
@@ -46,8 +53,32 @@ test("unknown tool name does not crash", () => {
   const c = new TelemetryCollector(dir);
   c.record("unknown.tool", 1, 10);
   const m = c.getMetrics();
+  assert.equal(m.total_tool_calls, 1);
   assert.equal(m.total_results_returned, 1);
   assert.equal(m.estimated_tokens_saved, 10);
+});
+
+test("recordEvent tracks failures and duration", () => {
+  const dir = makeTempContext();
+  const c = new TelemetryCollector(dir);
+  c.recordEvent({ tool: "context.search", phase: "error", duration_ms: 25 });
+  const m = c.getMetrics();
+  assert.equal(m.total_tool_calls, 1);
+  assert.equal(m.successful_tool_calls, 0);
+  assert.equal(m.failed_tool_calls, 1);
+  assert.equal(m.total_duration_ms, 25);
+  assert.equal(m.tool_metrics["context.search"].failures, 1);
+});
+
+test("session counters accumulate", () => {
+  const dir = makeTempContext();
+  const c = new TelemetryCollector(dir);
+  c.recordSessionStart();
+  c.recordSessionEnd(125);
+  const m = c.getMetrics();
+  assert.equal(m.session_starts, 1);
+  assert.equal(m.session_ends, 1);
+  assert.equal(m.session_duration_ms_total, 125);
 });
 
 test("flush writes metrics to disk", () => {

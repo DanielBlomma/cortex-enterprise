@@ -6,6 +6,10 @@ export type AuditQuery = {
   from?: string;
   to?: string;
   tool?: string;
+  event_type?: string;
+  evidence_level?: string;
+  status?: "success" | "error";
+  session_id?: string;
   limit?: number;
 };
 
@@ -61,6 +65,10 @@ export function queryAuditLog(contextDir: string, query: AuditQuery): AuditEntry
 
         // Apply tool filter
         if (query.tool && entry.tool !== query.tool) continue;
+        if (query.event_type && entry.event_type !== query.event_type) continue;
+        if (query.evidence_level && entry.evidence_level !== query.evidence_level) continue;
+        if (query.status && entry.status !== query.status) continue;
+        if (query.session_id && entry.session_id !== query.session_id) continue;
 
         results.push(entry);
       }

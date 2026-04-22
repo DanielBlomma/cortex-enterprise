@@ -1,10 +1,15 @@
 import type { TelemetryMetrics } from "@danielblomma/cortex-core/telemetry/collector";
+import { buildTelemetryPushPayload } from "../privacy/boundary.js";
 
 export type PushResult = {
   success: boolean;
   status?: number;
   error?: string;
   pushed_at?: string;
+};
+
+export type PushContext = {
+  session_id?: string;
 };
 
 let lastPush: PushResult | null = null;
@@ -24,6 +29,7 @@ export async function pushMetrics(
   metrics: TelemetryMetrics,
   endpoint: string,
   apiKey: string,
+  context: PushContext = {},
 ): Promise<PushResult> {
   if (!endpoint || !apiKey) {
     const result: PushResult = { success: false, error: "endpoint or api_key not configured" };
@@ -38,7 +44,7 @@ export async function pushMetrics(
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(metrics),
+      body: JSON.stringify(buildTelemetryPushPayload(metrics, context)),
       signal: AbortSignal.timeout(10000),
     });
 

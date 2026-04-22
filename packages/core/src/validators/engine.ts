@@ -33,6 +33,7 @@ export type EnforcedPolicy = {
   id: string;
   type?: string | null;
   config?: Record<string, unknown> | null;
+  severity?: "info" | "warning" | "error" | "block" | null;
 };
 
 const registry = new Map<string, ValidatorDef>();
@@ -82,6 +83,14 @@ export type ReviewOutput = {
   summary: ReviewSummary;
 };
 
+function resolvePolicySeverity(
+  policy: EnforcedPolicy,
+  fallback: ReviewResult["severity"],
+): ReviewResult["severity"] {
+  if (!policy.severity) return fallback;
+  return policy.severity === "block" ? "error" : policy.severity;
+}
+
 /**
  * Run validators for every enforced policy. Dispatch order per policy:
  *   1. If the policy has a `type`, look it up in the generic evaluator
@@ -129,7 +138,7 @@ export async function runValidators(
         results.push({
           policy_id: policy.id,
           pass: result.pass,
-          severity: result.severity,
+          severity: resolvePolicySeverity(policy, result.severity),
           message: result.message,
           detail: result.detail,
         });
@@ -165,7 +174,7 @@ export async function runValidators(
       results.push({
         policy_id: policy.id,
         pass: result.pass,
-        severity: result.severity,
+        severity: resolvePolicySeverity(policy, result.severity),
         message: result.message,
         detail: result.detail,
       });

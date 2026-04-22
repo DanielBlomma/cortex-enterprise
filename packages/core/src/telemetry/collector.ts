@@ -6,6 +6,13 @@ import { join } from "node:path";
 export type TelemetryMetrics = {
   period_start: string;
   period_end: string;
+  total_tool_calls: number;
+  successful_tool_calls: number;
+  failed_tool_calls: number;
+  total_duration_ms: number;
+  session_starts: number;
+  session_ends: number;
+  session_duration_ms_total: number;
   searches: number;
   related_lookups: number;
   caller_lookups: number;
@@ -18,6 +25,13 @@ export type TelemetryMetrics = {
   estimated_tokens_total: number;
   client_version: string;
   instance_id: string;
+  tool_metrics: Record<string, {
+    calls: number;
+    failures: number;
+    total_duration_ms: number;
+    total_results_returned: number;
+    estimated_tokens_saved: number;
+  }>;
 };
 
 const AVG_TOKENS_PER_RESULT = 400;
@@ -50,6 +64,13 @@ function emptyMetrics(clientVersion: string, instanceId: string): TelemetryMetri
   return {
     period_start: now,
     period_end: now,
+    total_tool_calls: 0,
+    successful_tool_calls: 0,
+    failed_tool_calls: 0,
+    total_duration_ms: 0,
+    session_starts: 0,
+    session_ends: 0,
+    session_duration_ms_total: 0,
     searches: 0,
     related_lookups: 0,
     caller_lookups: 0,
@@ -62,8 +83,17 @@ function emptyMetrics(clientVersion: string, instanceId: string): TelemetryMetri
     estimated_tokens_total: 0,
     client_version: clientVersion,
     instance_id: instanceId,
+    tool_metrics: {},
   };
 }
+
+export type TelemetryEvent = {
+  tool: string;
+  phase: "success" | "error";
+  result_count?: number;
+  estimated_tokens_saved?: number;
+  duration_ms?: number;
+};
 
 export class TelemetryCollector {
   private metrics: TelemetryMetrics;
@@ -89,8 +119,42 @@ export class TelemetryCollector {
     }
   }
 
-  record(toolName: string, resultCount: number, tokensSaved: number): void {
-    switch (toolName) {
+  private bucket(toolName: string) {
+    if (!this.metrics.tool_metrics[toolName]) {
+      this.metrics.tool_metrics[toolName] = {
+        calls: 0,
+        failures: 0,
+        total_duration_ms: 0,
+        total_results_returned: 0,
+        estimated_tokens_saved: 0,
+      };
+    }
+    return this.metrics.tool_metrics[toolName];
+  }
+
+  recordEvent(event: TelemetryEvent): void {
+    const resultCount = event.result_count ?? 0;
+    const tokensSaved = event.estimated_tokens_saved ?? 0;
+    const durationMs = event.duration_ms ?? 0;
+    const toolBucket = this.bucket(event.tool);
+
+    this.metrics.total_tool_calls++;
+    this.metrics.total_duration_ms += durationMs;
+    this.metrics.period_end = new Date().toISOString();
+
+    toolBucket.calls++;
+    toolBucket.total_duration_ms += durationMs;
+
+    if (event.phase === "error") {
+      this.metrics.failed_tool_calls++;
+      toolBucket.failures++;
+      this.dirty = true;
+      return;
+    }
+
+    this.metrics.successful_tool_calls++;
+
+    switch (event.tool) {
       case "context.search":
         this.metrics.searches++;
         break;
@@ -117,6 +181,31 @@ export class TelemetryCollector {
     this.metrics.total_results_returned += resultCount;
     this.metrics.estimated_tokens_saved += tokensSaved;
     this.metrics.estimated_tokens_total += tokensSaved + resultCount * AVG_TOKENS_PER_RESULT;
+
+    toolBucket.total_results_returned += resultCount;
+    toolBucket.estimated_tokens_saved += tokensSaved;
+    this.dirty = true;
+  }
+
+  record(toolName: string, resultCount: number, tokensSaved: number): void {
+    this.recordEvent({
+      tool: toolName,
+      phase: "success",
+      result_count: resultCount,
+      estimated_tokens_saved: tokensSaved,
+      duration_ms: 0,
+    });
+  }
+
+  recordSessionStart(): void {
+    this.metrics.session_starts++;
+    this.metrics.period_end = new Date().toISOString();
+    this.dirty = true;
+  }
+
+  recordSessionEnd(durationMs: number): void {
+    this.metrics.session_ends++;
+    this.metrics.session_duration_ms_total += Math.max(0, durationMs);
     this.metrics.period_end = new Date().toISOString();
     this.dirty = true;
   }

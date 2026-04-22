@@ -41,6 +41,7 @@ test("log creates audit directory and writes entry", async () => {
   const parsed = JSON.parse(content);
   assert.equal(parsed.tool, "context.search");
   assert.equal(parsed.result_count, 5);
+  assert.equal(parsed.status, undefined);
 });
 
 test("log appends multiple entries to same date file", async () => {
@@ -70,4 +71,22 @@ test("log writes to different date files", async () => {
 
   assert.ok(existsSync(join(dir, "audit", "2025-06-15.jsonl")));
   assert.ok(existsSync(join(dir, "audit", "2025-06-16.jsonl")));
+});
+
+test("log forwards entries to onEntry callback", async () => {
+  const dir = makeTempContext();
+  const seen = [];
+  const writer = new AuditWriter(dir, {
+    onEntry(entry) {
+      seen.push(entry);
+    },
+  });
+
+  writer.log(makeEntry({ event_type: "workflow_transition", evidence_level: "required" }));
+
+  await new Promise((r) => setTimeout(r, 50));
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].event_type, "workflow_transition");
+  assert.equal(seen[0].evidence_level, "required");
 });

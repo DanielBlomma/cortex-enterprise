@@ -1,6 +1,13 @@
 // Config
-export { loadEnterpriseConfig } from "./config.js";
-export type { TelemetryConfig, AuditConfig, PolicyConfig, EnterpriseConfig } from "./config.js";
+export { loadEnterpriseConfig, resolveEnterpriseActivation } from "./config.js";
+export type {
+  TelemetryConfig,
+  AuditConfig,
+  PolicyConfig,
+  EnterpriseConfig,
+  EnterpriseServiceConfig,
+  EnterpriseActivation
+} from "./config.js";
 
 // Telemetry
 export { TelemetryCollector } from "./telemetry/collector.js";
