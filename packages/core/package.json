@@ -1,6 +1,6 @@
 {
   "name": "@danielblomma/cortex-core",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Shared types and logic for Cortex Enterprise",
   "type": "module",
   "main": "dist/index.js",
@@ -51,7 +51,9 @@
       "import": "./dist/validators/builtins.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
