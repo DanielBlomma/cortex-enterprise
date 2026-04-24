@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const {
   loadWorkflowState,
@@ -120,4 +120,34 @@ test("warning-only review does not block approval", () => {
   assert.deepEqual(warned.last_review.failed_policies, []);
   assert.deepEqual(warned.last_review.warning_policies, ["require-test-coverage"]);
   assert.equal(warned.approval.status, "ready");
+});
+
+test("workflow review records reviewed file snapshots in state and artifact", () => {
+  const contextDir = makeContextDir();
+
+  const reviewed = recordWorkflowReview(contextDir, {
+    scope: "changed",
+    reviewed_files: [{ path: "app.ts", exists: true, hash: "abc123" }],
+    output: {
+      summary: { total: 1, passed: 1, failed: 0, warnings: 0 },
+      results: [
+        {
+          policy_id: "require-code-review",
+          pass: true,
+          severity: "info",
+          message: "Passed",
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(reviewed.last_review.reviewed_files, [
+    { path: "app.ts", exists: true, hash: "abc123" },
+  ]);
+
+  const artifactPath = join(dirname(contextDir), reviewed.last_review.artifact_path);
+  const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+  assert.deepEqual(artifact.reviewed_files, [
+    { path: "app.ts", exists: true, hash: "abc123" },
+  ]);
 });

@@ -57,6 +57,7 @@ export type WorkflowReviewSnapshot = {
   summary: ReviewSummary | null;
   failed_policies: string[];
   warning_policies: string[];
+  reviewed_files: WorkflowReviewedFileSnapshot[] | null;
 };
 
 export type WorkflowApproval = {
@@ -123,6 +124,13 @@ type WorkflowReviewArtifact = {
   scope: "all" | "changed";
   summary: ReviewSummary;
   results: ReviewResult[];
+  reviewed_files: WorkflowReviewedFileSnapshot[] | null;
+};
+
+export type WorkflowReviewedFileSnapshot = {
+  path: string;
+  exists: boolean;
+  hash: string | null;
 };
 
 function nowIso(): string {
@@ -175,6 +183,7 @@ function initialState(): WorkflowState {
       summary: null,
       failed_policies: [],
       warning_policies: [],
+      reviewed_files: null,
     },
     approval: {
       status: "blocked",
@@ -331,6 +340,7 @@ export function setWorkflowPlan(
     summary: null,
     failed_policies: [],
     warning_policies: [],
+    reviewed_files: null,
   };
   addHistory(state, "plan_set", {
     title: input.title,
@@ -377,7 +387,11 @@ export function startWorkflowImplementation(
 
 export function recordWorkflowReview(
   contextDir: string,
-  input: { scope: "all" | "changed"; output: ReviewOutput }
+  input: {
+    scope: "all" | "changed";
+    output: ReviewOutput;
+    reviewed_files?: WorkflowReviewedFileSnapshot[] | null;
+  }
 ): WorkflowState {
   const state = loadWorkflowState(contextDir);
   const recordedAt = nowIso();
@@ -395,6 +409,7 @@ export function recordWorkflowReview(
     scope: input.scope,
     summary: input.output.summary,
     results: input.output.results,
+    reviewed_files: input.reviewed_files ?? null,
   };
 
   ensureWorkflowDirs(contextDir);
@@ -412,6 +427,7 @@ export function recordWorkflowReview(
     summary: input.output.summary,
     failed_policies: blockingFailures.map((result) => result.policy_id),
     warning_policies: warningFailures.map((result) => result.policy_id),
+    reviewed_files: input.reviewed_files ?? null,
   };
   state.phase = hasBlockingFailures ? "iterating" : "reviewed";
   addHistory(state, "review_recorded", {

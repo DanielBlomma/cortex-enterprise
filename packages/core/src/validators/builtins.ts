@@ -1,10 +1,332 @@
-import { statSync, readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { statSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { registerValidator, type ValidatorContext, type ValidatorResult } from "./engine.js";
 // Side-effect imports: register generic evaluators (type-based dispatch)
 // alongside the name-based validators defined below.
 import "./evaluators/regex.js";
 import "./evaluators/code_comments.js";
+
+const DEFAULT_COVERAGE_PATHS = [
+  "coverage/coverage-summary.json",
+  "coverage-summary.json",
+  "coverage/lcov.info",
+  "lcov.info",
+] as const;
+
+type CoverageStats = {
+  sourcePath: string;
+  overall: number;
+  linePct: number | null;
+  branchPct: number | null;
+};
+
+function parseCoverageSummary(raw: string, sourcePath: string): CoverageStats | null {
+  const report = JSON.parse(raw);
+  const total = report?.total;
+  if (!total) return null;
+
+  const linePct = typeof total.lines?.pct === "number" ? total.lines.pct : null;
+  const branchPct = typeof total.branches?.pct === "number" ? total.branches.pct : null;
+  const overall = linePct ?? branchPct ?? null;
+  if (overall === null) return null;
+
+  return { sourcePath, overall, linePct, branchPct };
+}
+
+function parseLcov(raw: string, sourcePath: string): CoverageStats | null {
+  let linesFound = 0;
+  let linesHit = 0;
+  let branchesFound = 0;
+  let branchesHit = 0;
+
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("LF:")) {
+      linesFound += Number(trimmed.slice(3)) || 0;
+    } else if (trimmed.startsWith("LH:")) {
+      linesHit += Number(trimmed.slice(3)) || 0;
+    } else if (trimmed.startsWith("BRF:")) {
+      branchesFound += Number(trimmed.slice(4)) || 0;
+    } else if (trimmed.startsWith("BRH:")) {
+      branchesHit += Number(trimmed.slice(4)) || 0;
+    }
+  }
+
+  const linePct = linesFound > 0 ? (linesHit / linesFound) * 100 : null;
+  const branchPct = branchesFound > 0 ? (branchesHit / branchesFound) * 100 : null;
+  const overall = linePct ?? branchPct ?? null;
+  if (overall === null) return null;
+
+  return { sourcePath, overall, linePct, branchPct };
+}
+
+function loadCoverageStats(
+  projectRoot: string,
+  options: Record<string, unknown>,
+): CoverageStats | null {
+  const configuredPaths = Array.isArray(options.coverage_paths)
+    ? options.coverage_paths.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  const candidatePaths = typeof options.coverage_path === "string" && options.coverage_path.length > 0
+    ? [options.coverage_path]
+    : configuredPaths.length > 0
+      ? configuredPaths
+      : [...DEFAULT_COVERAGE_PATHS];
+
+  for (const coveragePath of candidatePaths) {
+    const abs = join(projectRoot, coveragePath);
+    if (!existsSync(abs)) continue;
+
+    try {
+      const raw = readFileSync(abs, "utf8");
+      const parsed = coveragePath.endsWith(".info")
+        ? parseLcov(raw, coveragePath)
+        : parseCoverageSummary(raw, coveragePath);
+      if (parsed) return parsed;
+    } catch {
+      // Try later fallback candidates before giving up on coverage entirely.
+    }
+  }
+
+  return null;
+}
+
+type ReviewStatusPayload = {
+  reviewed: boolean;
+  reviewer: string;
+  timestamp: string;
+  source: "legacy-review-status" | "workflow-state" | "workflow-artifact";
+  reviewedFiles: ReviewedFileSnapshot[] | null;
+};
+
+type ReviewedFileSnapshot = {
+  path: string;
+  exists: boolean;
+  hash: string | null;
+};
+
+type CurrentReviewedFileSnapshot = ReviewedFileSnapshot & {
+  mtimeMs: number | null;
+};
+
+function normalizeReviewedFiles(value: unknown): ReviewedFileSnapshot[] | null {
+  if (!Array.isArray(value)) return null;
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const candidate = entry as Record<string, unknown>;
+      if (typeof candidate.path !== "string" || candidate.path.length === 0) return null;
+      return {
+        path: candidate.path,
+        exists: candidate.exists === true,
+        hash: typeof candidate.hash === "string" ? candidate.hash : null,
+      };
+    })
+    .filter((entry): entry is ReviewedFileSnapshot => entry !== null)
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function readLegacyReviewStatus(contextDir: string): ReviewStatusPayload | null {
+  const statusPath = join(contextDir, "review-status.json");
+  if (!existsSync(statusPath)) return null;
+
+  try {
+    const raw = readFileSync(statusPath, "utf8");
+    const status = JSON.parse(raw);
+    return {
+      reviewed: status?.reviewed === true,
+      reviewer: typeof status?.reviewer === "string" ? status.reviewer : "unknown",
+      timestamp: typeof status?.timestamp === "string" ? status.timestamp : "unknown",
+      source: "legacy-review-status",
+      reviewedFiles: normalizeReviewedFiles(status?.reviewed_files),
+    };
+  } catch {
+    return {
+      reviewed: false,
+      reviewer: "unknown",
+      timestamp: "unknown",
+      source: "legacy-review-status",
+      reviewedFiles: null,
+    };
+  }
+}
+
+function parseReviewTimestamp(timestamp: string): number | null {
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function chooseLatestReviewStatus(
+  ...statuses: Array<ReviewStatusPayload | null>
+): ReviewStatusPayload | null {
+  let latest: ReviewStatusPayload | null = null;
+  let latestTs: number | null = null;
+
+  for (const status of statuses) {
+    if (!status) continue;
+
+    const currentTs = parseReviewTimestamp(status.timestamp);
+    if (!latest) {
+      latest = status;
+      latestTs = currentTs;
+      continue;
+    }
+
+    if (latestTs === null && currentTs !== null) {
+      latest = status;
+      latestTs = currentTs;
+      continue;
+    }
+
+    if (latestTs !== null && currentTs !== null && currentTs > latestTs) {
+      latest = status;
+      latestTs = currentTs;
+    }
+  }
+
+  return latest;
+}
+
+function readWorkflowReviewStatus(contextDir: string): ReviewStatusPayload | null {
+  let workflowStateStatus: ReviewStatusPayload | null = null;
+  const workflowStatePath = join(contextDir, "workflow", "state.json");
+  if (existsSync(workflowStatePath)) {
+    try {
+      const raw = readFileSync(workflowStatePath, "utf8");
+      const state = JSON.parse(raw);
+      const lastReview = state?.last_review;
+      if (typeof lastReview?.reviewed_at === "string" && lastReview.reviewed_at) {
+        workflowStateStatus = {
+          reviewed: lastReview.status === "passed",
+          reviewer: "context.review",
+          timestamp: lastReview.reviewed_at,
+          source: "workflow-state",
+          reviewedFiles: normalizeReviewedFiles(lastReview.reviewed_files),
+        };
+      }
+    } catch {
+      // Fall through to artifact lookup.
+    }
+  }
+
+  const reviewsDir = join(contextDir, "workflow", "reviews");
+  if (!existsSync(reviewsDir)) return workflowStateStatus;
+
+  try {
+    const fileNames = readdirSync(reviewsDir)
+      .filter((name) => name.endsWith(".json"))
+      .sort();
+    const latest = fileNames.at(-1);
+    if (!latest) return workflowStateStatus;
+
+    const raw = readFileSync(join(reviewsDir, latest), "utf8");
+    const artifact = JSON.parse(raw);
+    const summary = artifact?.summary;
+    const reviewedAt = typeof artifact?.recorded_at === "string" ? artifact.recorded_at : null;
+    if (!reviewedAt) return workflowStateStatus;
+
+    return chooseLatestReviewStatus(workflowStateStatus, {
+      reviewed: Number(summary?.failed ?? 0) === 0,
+      reviewer: "context.review",
+      timestamp: reviewedAt,
+      source: "workflow-artifact",
+      reviewedFiles: normalizeReviewedFiles(artifact?.reviewed_files),
+    });
+  } catch {
+    return workflowStateStatus;
+  }
+}
+
+function snapshotChangedFiles(
+  projectRoot: string,
+  changedFiles: string[],
+): CurrentReviewedFileSnapshot[] {
+  return [...new Set(changedFiles)]
+    .sort()
+    .map((file): CurrentReviewedFileSnapshot => {
+      const abs = join(projectRoot, file);
+      try {
+        const stat = statSync(abs);
+        if (!stat.isFile()) {
+          return { path: file, exists: false, hash: null, mtimeMs: null };
+        }
+
+        const hash = createHash("sha256")
+          .update(readFileSync(abs))
+          .digest("hex");
+        return {
+          path: file,
+          exists: true,
+          hash,
+          mtimeMs: stat.mtimeMs,
+        };
+      } catch {
+        return { path: file, exists: false, hash: null, mtimeMs: null };
+      }
+    });
+}
+
+function reviewMatchesCurrentChanges(
+  reviewStatus: ReviewStatusPayload,
+  ctx: ValidatorContext,
+): { matches: boolean; detail?: string } {
+  const changedFiles = ctx.changedFiles;
+  if (!reviewStatus.reviewed || !changedFiles || changedFiles.length === 0) {
+    return { matches: true };
+  }
+
+  const currentSnapshot = snapshotChangedFiles(ctx.projectRoot, changedFiles);
+
+  if (reviewStatus.reviewedFiles) {
+    if (reviewStatus.reviewedFiles.length !== currentSnapshot.length) {
+      return {
+        matches: false,
+        detail: "Current changed files differ from the reviewed snapshot.",
+      };
+    }
+
+    for (let index = 0; index < reviewStatus.reviewedFiles.length; index += 1) {
+      const reviewedFile = reviewStatus.reviewedFiles[index];
+      const currentFile = currentSnapshot[index];
+      if (
+        reviewedFile.path !== currentFile.path ||
+        reviewedFile.exists !== currentFile.exists ||
+        reviewedFile.hash !== currentFile.hash
+      ) {
+        return {
+          matches: false,
+          detail: "Current changed files differ from the reviewed snapshot.",
+        };
+      }
+    }
+
+    return { matches: true };
+  }
+
+  const reviewTimestamp = parseReviewTimestamp(reviewStatus.timestamp);
+  if (reviewTimestamp === null) {
+    return { matches: true };
+  }
+
+  for (const file of currentSnapshot) {
+    if (!file.exists) {
+      return {
+        matches: false,
+        detail: "Current changed files cannot be matched to the recorded review.",
+      };
+    }
+    if (file.mtimeMs !== null && file.mtimeMs > reviewTimestamp) {
+      return {
+        matches: false,
+        detail: "Current changed files were modified after the recorded review.",
+      };
+    }
+  }
+
+  return { matches: true };
+}
 
 // ── max-file-size ──
 
@@ -50,52 +372,45 @@ registerValidator({
   policyId: "require-test-coverage",
   async check(ctx: ValidatorContext, options: Record<string, unknown>): Promise<ValidatorResult> {
     const threshold = typeof options.threshold === "number" ? options.threshold : 80;
-    const coveragePath = typeof options.coverage_path === "string"
-      ? options.coverage_path
-      : "coverage/coverage-summary.json";
+    const configuredPaths = Array.isArray(options.coverage_paths)
+      ? options.coverage_paths.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : [];
+    const candidatePaths = typeof options.coverage_path === "string" && options.coverage_path.length > 0
+      ? [options.coverage_path]
+      : configuredPaths.length > 0
+        ? configuredPaths
+        : [...DEFAULT_COVERAGE_PATHS];
 
-    const abs = join(ctx.projectRoot, coveragePath);
-    if (!existsSync(abs)) {
+    let stats: CoverageStats | null = null;
+    try {
+      stats = loadCoverageStats(ctx.projectRoot, options);
+    } catch {
+      const target = candidatePaths[0] ?? "coverage artifact";
+      return { pass: false, severity: "warning", message: `Failed to parse coverage report at ${target}` };
+    }
+
+    if (!stats) {
       return {
         pass: false,
         severity: "warning",
-        message: `Coverage report not found at ${coveragePath}`,
-        detail: "Run your test suite with coverage enabled (e.g. npm test -- --coverage) and retry.",
+        message: `Coverage report not found at ${candidatePaths[0] ?? "known coverage paths"}`,
+        detail: `Looked for: ${candidatePaths.join(", ")}. Run your test suite with coverage enabled and retry.`,
       };
     }
 
-    try {
-      const raw = readFileSync(abs, "utf8");
-      const report = JSON.parse(raw);
-      const total = report?.total;
-      if (!total) {
-        return { pass: false, severity: "warning", message: "Coverage report missing 'total' key" };
-      }
-
-      // istanbul/nyc format: total.lines.pct, total.branches.pct, etc.
-      const linePct = typeof total.lines?.pct === "number" ? total.lines.pct : null;
-      const branchPct = typeof total.branches?.pct === "number" ? total.branches.pct : null;
-      const overall = linePct ?? branchPct ?? null;
-
-      if (overall === null) {
-        return { pass: false, severity: "warning", message: "Could not parse coverage percentage from report" };
-      }
-
-      const pass = overall >= threshold;
-      return {
-        pass,
-        severity: pass ? "info" : "error",
-        message: pass
-          ? `Coverage ${overall.toFixed(1)}% meets threshold (${threshold}%)`
-          : `Coverage ${overall.toFixed(1)}% below threshold (${threshold}%)`,
-        detail: [
-          linePct !== null ? `Lines: ${linePct.toFixed(1)}%` : null,
-          branchPct !== null ? `Branches: ${branchPct.toFixed(1)}%` : null,
-        ].filter(Boolean).join(", "),
-      };
-    } catch {
-      return { pass: false, severity: "warning", message: `Failed to parse coverage report at ${coveragePath}` };
-    }
+    const pass = stats.overall >= threshold;
+    return {
+      pass,
+      severity: pass ? "info" : "error",
+      message: pass
+        ? `Coverage ${stats.overall.toFixed(1)}% meets threshold (${threshold}%)`
+        : `Coverage ${stats.overall.toFixed(1)}% below threshold (${threshold}%)`,
+      detail: [
+        `Source: ${stats.sourcePath}`,
+        stats.linePct !== null ? `Lines: ${stats.linePct.toFixed(1)}%` : null,
+        stats.branchPct !== null ? `Branches: ${stats.branchPct.toFixed(1)}%` : null,
+      ].filter(Boolean).join(", "),
+    };
   },
 });
 
@@ -146,35 +461,51 @@ registerValidator({
 registerValidator({
   policyId: "require-code-review",
   async check(ctx: ValidatorContext, _options: Record<string, unknown>): Promise<ValidatorResult> {
-    // Check for a review-status file set by the /review command or CI
-    const statusPath = join(ctx.contextDir, "review-status.json");
-    if (!existsSync(statusPath)) {
+    const workflowStatus = readWorkflowReviewStatus(ctx.contextDir);
+    const legacyStatus = readLegacyReviewStatus(ctx.contextDir);
+    const reviewStatus = chooseLatestReviewStatus(workflowStatus, legacyStatus);
+    const freshness = reviewStatus ? reviewMatchesCurrentChanges(reviewStatus, ctx) : { matches: true };
+
+    if (reviewStatus?.reviewed && !freshness.matches) {
+      const sourceLabel = reviewStatus.source === "legacy-review-status"
+        ? "Code review"
+        : "Enterprise review";
       return {
         pass: false,
         severity: "warning",
-        message: "No code review recorded for current changes",
-        detail: "Run /review to perform a code review, or ensure your CI writes .context/review-status.json.",
+        message: `${sourceLabel} at ${reviewStatus.timestamp} is stale for current changes`,
+        detail: `Source: ${reviewStatus.source}. ${freshness.detail ?? "Current changes no longer match the reviewed code."}`,
       };
     }
 
-    try {
-      const raw = readFileSync(statusPath, "utf8");
-      const status = JSON.parse(raw);
-      const reviewed = status?.reviewed === true;
-      const reviewer = typeof status?.reviewer === "string" ? status.reviewer : "unknown";
-      const timestamp = typeof status?.timestamp === "string" ? status.timestamp : "unknown";
-
+    if (reviewStatus?.source === "workflow-state" || reviewStatus?.source === "workflow-artifact") {
       return {
-        pass: reviewed,
-        severity: reviewed ? "info" : "warning",
-        message: reviewed
-          ? `Code review completed by ${reviewer} at ${timestamp}`
-          : "Code review recorded but not approved",
-        detail: reviewed ? undefined : JSON.stringify(status, null, 2),
+        pass: reviewStatus.reviewed,
+        severity: reviewStatus.reviewed ? "info" : "warning",
+        message: reviewStatus.reviewed
+          ? `Enterprise review completed by ${reviewStatus.reviewer} at ${reviewStatus.timestamp}`
+          : `Enterprise review recorded at ${reviewStatus.timestamp} but did not pass`,
+        detail: `Source: ${reviewStatus.source}`,
       };
-    } catch {
-      return { pass: false, severity: "warning", message: "Failed to parse review-status.json" };
     }
+
+    if (reviewStatus) {
+      return {
+        pass: reviewStatus.reviewed,
+        severity: reviewStatus.reviewed ? "info" : "warning",
+        message: reviewStatus.reviewed
+          ? `Code review completed by ${reviewStatus.reviewer} at ${reviewStatus.timestamp}`
+          : "Code review recorded but not approved",
+        detail: reviewStatus.reviewed ? undefined : `Source: ${reviewStatus.source}`,
+      };
+    }
+
+    return {
+      pass: false,
+      severity: "warning",
+      message: "No code review recorded for current changes",
+      detail: "Run /review or context.review, or ensure your CI writes .context/review-status.json.",
+    };
   },
 });
 

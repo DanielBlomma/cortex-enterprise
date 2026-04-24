@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +23,10 @@ function makeTempProject() {
 
 function cleanup(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 // --- engine ---
@@ -302,6 +307,70 @@ test("require-test-coverage fails when below threshold", async () => {
   }
 });
 
+test("require-test-coverage supports lcov.info fallback", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const coverageDir = path.join(projectRoot, "coverage");
+    fs.mkdirSync(coverageDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(coverageDir, "lcov.info"),
+      [
+        "TN:",
+        "SF:src/app.ts",
+        "LF:10",
+        "LH:9",
+        "BRF:4",
+        "BRH:3",
+        "end_of_record",
+      ].join("\n"),
+    );
+    const output = await runValidators(
+      new Set(["require-test-coverage"]),
+      { contextDir, projectRoot },
+      { "require-test-coverage": { threshold: 80 } },
+    );
+    assert.equal(output.results[0].pass, true);
+    assert.match(output.results[0].detail ?? "", /Source: coverage\/lcov\.info/);
+    assert.match(output.results[0].message, /90\.0%/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-test-coverage skips invalid summary and falls back to lcov.info", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const coverageDir = path.join(projectRoot, "coverage");
+    fs.mkdirSync(coverageDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(coverageDir, "coverage-summary.json"),
+      JSON.stringify({ total: { lines: {}, branches: {} } }),
+    );
+    fs.writeFileSync(
+      path.join(coverageDir, "lcov.info"),
+      [
+        "TN:",
+        "SF:src/app.ts",
+        "LF:12",
+        "LH:10",
+        "BRF:2",
+        "BRH:2",
+        "end_of_record",
+      ].join("\n"),
+    );
+    const output = await runValidators(
+      new Set(["require-test-coverage"]),
+      { contextDir, projectRoot },
+      { "require-test-coverage": { threshold: 80 } },
+    );
+    assert.equal(output.results[0].pass, true);
+    assert.match(output.results[0].detail ?? "", /Source: coverage\/lcov\.info/);
+    assert.match(output.results[0].message, /83\.3%/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
 // --- no-external-api-calls ---
 
 test("no-external-api-calls passes with clean files", async () => {
@@ -366,6 +435,221 @@ test("require-code-review passes with approved review", async () => {
     );
     assert.equal(output.results[0].pass, true);
     assert.match(output.results[0].message, /alice/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review passes with workflow state review", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "passed",
+          reviewed_at: "2026-04-23T10:00:00Z",
+        },
+      }),
+    );
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot },
+      {},
+    );
+    assert.equal(output.results[0].pass, true);
+    assert.match(output.results[0].message, /Enterprise review completed/);
+    assert.match(output.results[0].detail ?? "", /workflow-state/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review preserves workflow state review when reviews dir is empty", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    fs.mkdirSync(path.join(workflowDir, "reviews"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "passed",
+          reviewed_at: "2026-04-23T10:00:00Z",
+        },
+      }),
+    );
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot },
+      {},
+    );
+    assert.equal(output.results[0].pass, true);
+    assert.match(output.results[0].detail ?? "", /workflow-state/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review fails when latest workflow review failed", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "failed",
+          reviewed_at: "2026-04-23T10:00:00Z",
+        },
+      }),
+    );
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].message, /did not pass/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review fails when current changes differ from the reviewed snapshot", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    const appPath = path.join(projectRoot, "app.ts");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(appPath, "export const value = 1;\n");
+
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "passed",
+          reviewed_at: "2026-04-23T10:00:00Z",
+          reviewed_files: [
+            {
+              path: "app.ts",
+              exists: true,
+              hash: sha256("export const value = 1;\n"),
+            },
+          ],
+        },
+      }),
+    );
+
+    fs.writeFileSync(appPath, "export const value = 2;\n");
+
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot, changedFiles: ["app.ts"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].message, /stale/);
+    assert.match(output.results[0].detail ?? "", /reviewed snapshot/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review falls back to review timestamp for state-only records", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    const appPath = path.join(projectRoot, "app.ts");
+    const reviewedAt = new Date(Date.now() - 60_000);
+    const modifiedAt = new Date(reviewedAt.getTime() + 30_000);
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(appPath, "export const value = 1;\n");
+    fs.utimesSync(appPath, modifiedAt, modifiedAt);
+
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "passed",
+          reviewed_at: reviewedAt.toISOString(),
+        },
+      }),
+    );
+
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot, changedFiles: ["app.ts"] },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].message, /stale/);
+    assert.match(output.results[0].detail ?? "", /modified after the recorded review/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review prefers the newest review status across workflow and legacy markers", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(contextDir, "review-status.json"),
+      JSON.stringify({ reviewed: true, reviewer: "alice", timestamp: "2026-04-16T10:00:00Z" }),
+    );
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "failed",
+          reviewed_at: "2026-04-23T10:00:00Z",
+        },
+      }),
+    );
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot },
+      {},
+    );
+    assert.equal(output.results[0].pass, false);
+    assert.match(output.results[0].message, /did not pass/);
+    assert.match(output.results[0].detail ?? "", /workflow-state/);
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("require-code-review prefers newer legacy approval over stale workflow failure", async () => {
+  const { projectRoot, contextDir } = makeTempProject();
+  try {
+    const workflowDir = path.join(contextDir, "workflow");
+    fs.mkdirSync(workflowDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowDir, "state.json"),
+      JSON.stringify({
+        last_review: {
+          status: "failed",
+          reviewed_at: "2026-04-23T10:00:00Z",
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(contextDir, "review-status.json"),
+      JSON.stringify({ reviewed: true, reviewer: "alice", timestamp: "2026-04-23T10:15:00Z" }),
+    );
+    const output = await runValidators(
+      new Set(["require-code-review"]),
+      { contextDir, projectRoot },
+      {},
+    );
+    assert.equal(output.results[0].pass, true);
+    assert.match(output.results[0].message, /alice/);
+    assert.equal(output.results[0].detail, undefined);
   } finally {
     cleanup(projectRoot);
   }

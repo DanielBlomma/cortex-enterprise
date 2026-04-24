@@ -1,4 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createHash } from "node:crypto";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { walkProjectFiles } from "./walk.js";
 import type { EnterpriseConfig } from "@danielblomma/cortex-core/config";
@@ -24,15 +27,45 @@ import {
   reviewWorkflowPlan,
   setWorkflowPlan,
   startWorkflowImplementation,
+  type WorkflowReviewedFileSnapshot,
 } from "../workflow/state.js";
 import { queryAuditLog } from "@danielblomma/cortex-core/audit/query";
 import { checkAccess, getAccessDeniedMessage, type Role } from "@danielblomma/cortex-core/rbac/check";
-import { runValidators } from "@danielblomma/cortex-core/validators/engine";
+import {
+  getGenericEvaluator,
+  getValidator,
+  runValidators,
+} from "@danielblomma/cortex-core/validators/engine";
 import "@danielblomma/cortex-core/validators/builtins";
 
 type ToolPayload = Record<string, unknown>;
 
 const VALID_ROLES = new Set<Role>(["admin", "developer", "readonly"]);
+
+function snapshotReviewedFiles(
+  projectRoot: string,
+  changedFiles: string[] | undefined,
+): WorkflowReviewedFileSnapshot[] | null {
+  if (!changedFiles) return null;
+
+  return [...new Set(changedFiles)]
+    .sort()
+    .map((file): WorkflowReviewedFileSnapshot => {
+      const abs = join(projectRoot, file);
+      try {
+        const stat = statSync(abs);
+        if (!stat.isFile()) {
+          return { path: file, exists: false, hash: null };
+        }
+        const hash = createHash("sha256")
+          .update(readFileSync(abs))
+          .digest("hex");
+        return { path: file, exists: true, hash };
+      } catch {
+        return { path: file, exists: false, hash: null };
+      }
+    });
+}
 
 function buildToolResult(data: ToolPayload) {
   return {
@@ -842,14 +875,43 @@ export function registerEnterpriseTools(
       // rules. Predefined rules leave type/config null and route to the
       // name-based validator registry.
       const policies = policyStore.getMergedPolicies();
+      const skippedPolicies = policies
+        .filter((p) => p.enforce)
+        .filter((p) => p.id === "require-code-review" || (p.type ? !getGenericEvaluator(p.type) : !getValidator(p.id)))
+        .map((p) => {
+          if (p.id === "require-code-review") {
+            return {
+              policy_id: p.id,
+              kind: p.kind ?? null,
+              type: p.type ?? null,
+              reason: "Current context.review invocation is the review being recorded; validate this policy from workflow state on the next run.",
+            };
+          }
+          return {
+            policy_id: p.id,
+            kind: p.kind ?? null,
+            type: p.type ?? null,
+            reason: p.type
+              ? `No evaluator registered for type "${p.type}"`
+              : "No executable validator registered for this policy",
+          };
+        });
+
       const enforced = policies
         .filter((p) => p.enforce)
+        .filter((p) => {
+          if (p.id === "require-code-review") return false;
+          if (p.type) return Boolean(getGenericEvaluator(p.type));
+          return Boolean(getValidator(p.id));
+        })
         .map((p) => ({
           id: p.id,
           type: p.type ?? null,
           config: p.config ?? null,
           severity: p.severity ?? "block",
         }));
+
+      const now = new Date().toISOString();
 
       const output = await runValidators(enforced, {
         contextDir,
@@ -863,7 +925,6 @@ export function registerEnterpriseTools(
         : output.results.filter((r) => !r.pass);
 
       // Queue failures as violations
-      const now = new Date().toISOString();
       for (const r of output.results) {
         if (!r.pass) {
           queueViolation({
@@ -900,19 +961,40 @@ export function registerEnterpriseTools(
           passed: output.summary.passed,
           failed: output.summary.failed,
           warnings: output.results.filter((r) => !r.pass && r.severity === "warning").length,
+          skipped: skippedPolicies.length,
         },
       });
 
+      const reviewedFiles = snapshotReviewedFiles(projectRoot, changedFiles);
       const workflowState = recordWorkflowReview(contextDir, {
         scope: parsed.scope,
         output,
+        reviewed_files: reviewedFiles,
       });
+      const lastReview = workflowState.last_review;
+      if (lastReview) {
+        writeFileSync(
+          join(contextDir, "review-status.json"),
+          `${JSON.stringify({
+            reviewed: lastReview.status === "passed",
+            reviewer: "context.review",
+            timestamp: lastReview.reviewed_at,
+            scope: parsed.scope,
+            reviewed_files: reviewedFiles,
+          }, null, 2)}\n`,
+          "utf8",
+        );
+      }
       await pushWorkflowStateIfConfigured(config, workflowState);
 
       return buildToolResult({
         scope: parsed.scope,
         results,
-        summary: output.summary,
+        skipped_policies: skippedPolicies,
+        summary: {
+          ...output.summary,
+          skipped: skippedPolicies.length,
+        },
         workflow: workflowState,
       });
     },

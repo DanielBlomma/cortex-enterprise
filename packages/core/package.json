@@ -1,6 +1,6 @@
 {
   "name": "@danielblomma/cortex-core",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Shared types and logic for Cortex Enterprise",
   "type": "module",
   "main": "dist/index.js",
