@@ -12,8 +12,11 @@ packages/*/node_modules/
 .context/plan/
 .context/hooks/
 .context/enterprise.yaml
+.context/review-status.json
+.context/workflow/
 .npm-cache/
 mcp/.npm-cache/
 mcp/dist/
 mcp/node_modules/
 mcp/package-lock.json
+

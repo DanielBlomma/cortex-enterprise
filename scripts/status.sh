@@ -24,6 +24,13 @@ console.log(`[status] files=${c.files ?? 0} adrs=${c.adrs ?? 0} rules=${c.rules 
 console.log(`[status] rels constrains=${c.relations_constrains ?? 0} implements=${c.relations_implements ?? 0} supersedes=${c.relations_supersedes ?? 0}`);
 const s = data.skipped || {};
 console.log(`[status] skipped unsupported=${s.unsupported ?? 0} too_large=${s.too_large ?? s.tooLarge ?? 0} binary=${s.binary ?? 0}`);
+const parserHealth = data.parser_health || {};
+if (parserHealth.csharp) {
+  console.log(`[status] csharp_parser available=${parserHealth.csharp.available} files=${parserHealth.csharp.files ?? 0} chunks=${parserHealth.csharp.chunks ?? 0}`);
+  if (parserHealth.csharp.reason) {
+    console.log(`[status] csharp_parser_reason=${parserHealth.csharp.reason}`);
+  }
+}
 if (typeof data.incremental_mode === "boolean") {
   console.log(`[status] incremental_mode=${data.incremental_mode} changed_candidates=${data.changed_candidates ?? 0} deleted_paths=${data.deleted_paths ?? 0}`);
 }
@@ -287,10 +294,3 @@ try {
   console.log(`[status] cortex_update_check=unavailable (${message})`);
 }
 ' "$REPO_ROOT" "$REPO_ROOT/.context/cache" "${CORTEX_CLI_VERSION:-}"
-
-PLAN_SCRIPT="$REPO_ROOT/scripts/plan-state.sh"
-if [[ -x "$PLAN_SCRIPT" ]]; then
-  if ! "$PLAN_SCRIPT" show; then
-    echo "[plan] warning: failed to read plan state"
-  fi
-fi

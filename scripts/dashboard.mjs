@@ -24,10 +24,13 @@ const SUPPORTED_TEXT_EXTENSIONS = new Set([
 // Same skip dirs as ingest.mjs
 const SKIP_DIRECTORIES = new Set([
   ".git", ".idea", ".vscode", "node_modules",
-  "dist", "build", "coverage", ".next", ".cache", ".context"
+  "bin", "obj", "dist", "build", "coverage", ".next", ".cache", ".context"
 ]);
 
 const MAX_FILE_BYTES = 1024 * 1024;
+const VERSION_CHECK_TTL_MS = 10 * 60 * 1000;
+const VERSION_LOOKUP_TIMEOUT_MS = 8000;
+const VERSION_INSTALL_HINT = "npm i -g github:DanielBlomma/cortex";
 
 // ── ANSI helpers ──────────────────────────────────────────────
 const ESC = "\x1b";
@@ -36,7 +39,8 @@ const BOLD = `${ESC}[1m`;
 const DIM = `${ESC}[2m`;
 const HIDE_CURSOR = `${ESC}[?25l`;
 const SHOW_CURSOR = `${ESC}[?25h`;
-const CLEAR = `${ESC}[2J${ESC}[H`;
+const HOME = `${ESC}[H`;
+const CLEAR_DOWN = `${ESC}[J`;
 
 const C = {
   gray: `${ESC}[38;5;245m`,
@@ -90,7 +94,11 @@ function walkDirectory(dirPath, files) {
     if (entry.isDirectory()) {
       walkDirectory(abs, files);
     } else if (entry.isFile()) {
-      files.push(abs);
+      if (typeof files.add === "function") {
+        files.add(abs);
+      } else {
+        files.push(abs);
+      }
     }
   }
 }
@@ -108,20 +116,20 @@ function hasSourcePrefix(relPath, sourcePaths) {
 }
 
 // ── Data: baseline scan ──────────────────────────────────────
-function scanBaseline() {
-  if (!fs.existsSync(CONFIG_PATH)) return { files: 0, lines: 0, chars: 0, tokens: 0 };
+function scanBaseline(repoRoot = REPO_ROOT, configPath = CONFIG_PATH) {
+  if (!fs.existsSync(configPath)) return { files: 0, lines: 0, chars: 0, tokens: 0 };
 
-  const configText = fs.readFileSync(CONFIG_PATH, "utf8");
-  const sourcePaths = parseSourcePaths(configText);
+  const configText = fs.readFileSync(configPath, "utf8");
+  const sourcePaths = [...new Set(parseSourcePaths(configText))];
   if (sourcePaths.length === 0) return { files: 0, lines: 0, chars: 0, tokens: 0 };
 
-  const allFiles = [];
+  const allFiles = new Set();
   for (const sp of sourcePaths) {
-    const abs = path.resolve(REPO_ROOT, sp);
+    const abs = path.resolve(repoRoot, sp);
     if (!fs.existsSync(abs)) continue;
     const stat = fs.statSync(abs);
     if (stat.isFile()) {
-      allFiles.push(abs);
+      allFiles.add(abs);
     } else if (stat.isDirectory()) {
       walkDirectory(abs, allFiles);
     }
@@ -196,6 +204,7 @@ function computeFreshness(manifest) {
   try {
     const output = execSync("git status --porcelain", {
       cwd: REPO_ROOT, stdio: ["ignore", "pipe", "ignore"], encoding: "utf8", timeout: 3000,
+      shell: true,
     });
 
     for (const rawLine of output.split(/\r?\n/)) {
@@ -235,6 +244,146 @@ function computeFreshness(manifest) {
   };
 }
 
+let versionStatusCache = {
+  expiresAt: 0,
+  value: null,
+};
+
+function parseVersion(value) {
+  const match = String(value || "").trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return null;
+  return match.slice(1).map((part) => Number(part));
+}
+
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] > b[i]) return 1;
+    if (a[i] < b[i]) return -1;
+  }
+  return 0;
+}
+
+function shorten(text, max = 40) {
+  const value = String(text || "").trim();
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function summarizeError(error) {
+  if (error && typeof error === "object" && error.code === "ETIMEDOUT") {
+    return `version check timed out after ${Math.round(VERSION_LOOKUP_TIMEOUT_MS / 1000)}s`;
+  }
+  const raw = error instanceof Error ? error.message : String(error);
+  return shorten(raw.split(/\r?\n/)[0].trim());
+}
+
+function getLocalCliVersion() {
+  const envVersion = String(process.env.CORTEX_CLI_VERSION || "").trim();
+  if (parseVersion(envVersion)) {
+    return envVersion;
+  }
+
+  try {
+    const output = execSync("cortex --version", {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 1500,
+      shell: true,
+    }).trim();
+    if (parseVersion(output)) {
+      return output;
+    }
+  } catch {
+    // Ignore and report unavailable below.
+  }
+
+  return "";
+}
+
+function getVersionStatus() {
+  const now = Date.now();
+  if (versionStatusCache.value && versionStatusCache.expiresAt > now) {
+    return versionStatusCache.value;
+  }
+
+  const local = getLocalCliVersion();
+  let value;
+
+  if (!local) {
+    value = {
+      state: "unavailable",
+      local: null,
+      latest: null,
+      message: "local version not detected",
+    };
+  } else {
+    const localParsed = parseVersion(local);
+    if (!localParsed) {
+      value = {
+        state: "unavailable",
+        local,
+        latest: null,
+        message: "unsupported local version format",
+      };
+    } else {
+      try {
+        const npmCache = path.join(CACHE_DIR, "npm-cache");
+        const latestRaw = execSync("npm view github:DanielBlomma/cortex version --json", {
+          cwd: REPO_ROOT,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+          timeout: VERSION_LOOKUP_TIMEOUT_MS,
+          env: { ...process.env, NPM_CONFIG_CACHE: npmCache },
+          shell: true,
+        }).trim();
+        const parsedLatest = JSON.parse(latestRaw);
+        const latest = Array.isArray(parsedLatest)
+          ? parsedLatest[parsedLatest.length - 1]
+          : parsedLatest;
+        const latestParsed = parseVersion(latest);
+
+        if (!latestParsed) {
+          value = {
+            state: "unavailable",
+            local,
+            latest,
+            message: "unsupported latest version format",
+          };
+        } else if (compareVersions(latestParsed, localParsed) > 0) {
+          value = {
+            state: "update-available",
+            local,
+            latest,
+            message: null,
+          };
+        } else {
+          value = {
+            state: "current",
+            local,
+            latest,
+            message: null,
+          };
+        }
+      } catch (error) {
+        value = {
+          state: "unavailable",
+          local,
+          latest: null,
+          message: summarizeError(error),
+        };
+      }
+    }
+  }
+
+  versionStatusCache = {
+    expiresAt: now + VERSION_CHECK_TTL_MS,
+    value,
+  };
+
+  return value;
+}
+
 // ── Data: degree analysis ────────────────────────────────────
 function computeTopConnected() {
   const degree = new Map();
@@ -263,21 +412,41 @@ function computeTopConnected() {
     });
 }
 
-// ── Data: estimate Cortex search tokens ──────────────────────
-function estimateCortexSearchTokens() {
-  const entities = readJsonlSafe(path.join(CACHE_DIR, "entities.file.jsonl"));
-  if (entities.length === 0) return { searchTokens: 0, avgExcerptTokens: 0 };
-
-  let totalExcerptChars = 0;
-  for (const e of entities) {
-    totalExcerptChars += (e.excerpt || "").length;
+// ── Data: estimate tokens per task (realistic comparison) ────
+function estimatePerTaskTokens(baseline) {
+  if (baseline.files === 0) {
+    return { codebase: baseline.tokens, baselinePerTask: 0, cortexPerTask: 0,
+             filesPerTask: 0, queriesPerTask: 0, ratio: 0, reduction: 0 };
   }
 
-  const avgExcerptChars = totalExcerptChars / entities.length;
-  const topK = 5;
-  const searchTokens = Math.round((topK * avgExcerptChars) / 4 + 200);
+  // --- Without Cortex: LLM reads ~12 files per task for exploration + context ---
+  const TYPICAL_FILES_PER_TASK = 12;
+  const filesPerTask = Math.min(TYPICAL_FILES_PER_TASK, baseline.files);
+  const avgFileTokens = Math.round(baseline.tokens / baseline.files);
+  const baselinePerTask = filesPerTask * avgFileTokens;
 
-  return { searchTokens, avgExcerptTokens: Math.round(avgExcerptChars / 4) };
+  // --- With Cortex: ~3 search queries per task, top 5 results each ---
+  // Fixed cost per result: search returns truncated snippets + metadata.
+  // More entities in the index = better precision, NOT more tokens per query.
+  const TYPICAL_SEARCHES_PER_TASK = 3;
+  const topK = 5;
+  const PER_RESULT_CHARS = 850; // ~500 char snippet + ~350 char metadata
+  const PER_QUERY_OVERHEAD = 300; // query wrapper, ranking, counts
+  const perQueryTokens = Math.round((topK * PER_RESULT_CHARS + PER_QUERY_OVERHEAD) / 4);
+  const cortexPerTask = TYPICAL_SEARCHES_PER_TASK * perQueryTokens;
+
+  const ratio = cortexPerTask > 0 ? Math.round(baselinePerTask / cortexPerTask) : 0;
+  const reduction = baselinePerTask > 0 ? Math.round((1 - cortexPerTask / baselinePerTask) * 100) : 0;
+
+  return {
+    codebase: baseline.tokens,
+    baselinePerTask,
+    cortexPerTask,
+    filesPerTask,
+    queriesPerTask: TYPICAL_SEARCHES_PER_TASK,
+    ratio,
+    reduction: Math.max(0, reduction)
+  };
 }
 
 // ── Data: gather all ─────────────────────────────────────────
@@ -297,17 +466,14 @@ function gatherData(baselineCache) {
   const relSupersedes = gc.supersedes || ic.relations_supersedes || 0;
   const totalRelations = relCalls + relDefines + relConstrains + relImplements + relImports + relSupersedes;
 
-  const tokenEstimate = estimateCortexSearchTokens();
-  const rawTokens = baseline.tokens;
-  const cortexTokens = tokenEstimate.searchTokens;
-  const ratio = cortexTokens > 0 ? Math.round(rawTokens / cortexTokens) : 0;
-  const reduction = rawTokens > 0 ? Math.round((1 - cortexTokens / rawTokens) * 100) : 0;
+  const tokenEstimate = estimatePerTaskTokens(baseline);
 
-  const embedCount = ec.embedded ?? ec.output ?? ec.entities ?? 0;
+  const embedCount = ec.output ?? ec.entities ?? 0;
   const embedModel = manifests.embed?.model || null;
   const embedDim = manifests.embed?.dimensions || 0;
 
   const freshness = computeFreshness(manifests.ingest);
+  const version = getVersionStatus();
   const topConnected = computeTopConnected();
 
   const timeAgo = (isoStr) => {
@@ -331,9 +497,11 @@ function gatherData(baselineCache) {
       totalEntities,
       relations: { calls: relCalls, defines: relDefines, constrains: relConstrains, implements: relImplements, imports: relImports, supersedes: relSupersedes, total: totalRelations },
     },
-    tokens: { raw: rawTokens, cortexSearch: cortexTokens, ratio, reduction },
+    tokens: tokenEstimate,
     embeddings: embedModel ? { model: embedModel, count: embedCount, dimensions: embedDim } : null,
+    parserHealth: manifests.ingest?.parser_health || {},
     freshness,
+    version,
     topConnected,
     timestamps: {
       lastIngest: timeAgo(manifests.ingest?.generated_at),
@@ -387,6 +555,19 @@ function emptyLine(width) {
   return col("│", C.gray) + " ".repeat(width - 2) + col("│", C.gray);
 }
 
+// ── Edition detection ────────────────────────────────────────
+import { createRequire } from "node:module";
+const __require = createRequire(import.meta.url);
+
+function detectEdition() {
+  try {
+    __require.resolve("@danielblomma/cortex-enterprise");
+    return "Enterprise";
+  } catch {
+    return "Community";
+  }
+}
+
 // ── Render sections ──────────────────────────────────────────
 function render(data, isTTY) {
   const termWidth = process.stdout.columns || 80;
@@ -395,11 +576,21 @@ function render(data, isTTY) {
 
   // Header
   const clock = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-  const title = "─ cortex dashboard ";
+  const edition = detectEdition();
+  const title = `─ cortex dashboard [${edition}] `;
   const clockPart = ` ${clock} ─`;
   const fillLen = w - 2 - title.length - clockPart.length;
   lines.push(col(`┌${title}${"─".repeat(Math.max(0, fillLen))}${clockPart}┐`, C.gray));
   lines.push(emptyLine(w));
+
+  if (data.version.state === "update-available") {
+    lines.push(sideBorder(bold(col("VERSION WARNING", C.red)), w));
+    lines.push(sideBorder(
+      `${col("Update available:", C.red)} ${bold(col(`${data.version.local} -> ${data.version.latest}`, C.red))}`, w));
+    lines.push(sideBorder(
+      `${dim("Run:")} ${col(VERSION_INSTALL_HINT, C.yellow)}`, w));
+    lines.push(emptyLine(w));
+  }
 
   // ── WITHOUT vs WITH CORTEX ──
   lines.push(sideBorder(
@@ -428,14 +619,16 @@ function render(data, isTTY) {
   lines.push(emptyLine(w));
 
   // ── TOKENS ──
-  lines.push(sideBorder(bold("TOKENS"), w));
+  lines.push(sideBorder(bold("TOKENS") + dim("  per task estimate"), w));
   lines.push(sideBorder(
-    `${dim("Raw dump:")}     ${col(`~${formatNum(data.tokens.raw)} tokens`, C.gray)}`, w));
+    `${dim("Codebase:")}       ${col(`~${formatNum(data.tokens.codebase)} tokens`, C.gray)} ${dim(`across ${data.baseline.files} files`)}`, w));
   lines.push(sideBorder(
-    `${dim("Cortex search:")} ${col(`~${formatNum(data.tokens.cortexSearch)} tokens`, C.green)} ${dim("(top 5 results)")}`, w));
+    `${dim("Without Cortex:")} ${col(`~${formatNum(data.tokens.baselinePerTask)} tokens`, C.gray)} ${dim(`(≈${data.tokens.filesPerTask} file reads)`)}`, w));
+  lines.push(sideBorder(
+    `${dim("With Cortex:")}    ${col(`~${formatNum(data.tokens.cortexPerTask)} tokens`, C.green)} ${dim(`(≈${data.tokens.queriesPerTask} searches)`)}`, w));
   if (data.tokens.ratio > 0) {
     lines.push(sideBorder(
-      `${dim("Efficiency:")}   ${bold(col(`${data.tokens.ratio}x`, C.green))} ${dim("reduction")}`, w));
+      `${dim("Efficiency:")}    ${bold(col(`${data.tokens.ratio}x`, C.green))} ${dim("reduction")}`, w));
     const reductionWidth = Math.min(40, w - 16);
     const filled = Math.round((data.tokens.reduction / 100) * reductionWidth);
     const reductionBar = col("█".repeat(filled), C.green) + col("░".repeat(reductionWidth - filled), C.dimGray);
@@ -492,12 +685,33 @@ function render(data, isTTY) {
   } else {
     lines.push(sideBorder(dim("Freshness: unavailable (git not accessible)"), w));
   }
+  if (data.version.state === "update-available") {
+    lines.push(sideBorder(
+      `Version: ${bold(col("UPDATE AVAILABLE", C.red))} ${col(`${data.version.local} -> ${data.version.latest}`, C.red)}`, w));
+  } else if (data.version.state === "current") {
+    lines.push(sideBorder(
+      `Version: ${col(data.version.local, C.green)} ${dim(`Latest: ${data.version.latest}`)}`, w));
+  } else if (data.version.local) {
+    lines.push(sideBorder(
+      `Version: ${col(data.version.local, C.yellow)}  ${dim(`Check unavailable: ${data.version.message}`)}`, w));
+  } else {
+    lines.push(sideBorder(
+      `Version: ${col("check unavailable", C.yellow)}  ${dim(data.version.message)}`, w));
+  }
   if (data.embeddings) {
     const check = data.embeddings.count > 0 ? col("✓", C.green) : col("✗", C.red);
     lines.push(sideBorder(
       `Embeddings: ${data.embeddings.count} ${check}       ${dim(`Model: ${data.embeddings.model}`)}`, w));
   } else {
     lines.push(sideBorder(`Embeddings: ${col("not generated", C.yellow)}  ${dim("Run: cortex embed")}`, w));
+  }
+  if (data.parserHealth.csharp && Number(data.parserHealth.csharp.files || 0) > 0) {
+    const csharp = data.parserHealth.csharp;
+    if (!csharp.available) {
+      lines.push(sideBorder(`Parser warning (C#): ${col("unavailable", C.red)}  ${dim(csharp.reason || "install .NET SDK")}`, w));
+    } else if (csharp.chunks === 0) {
+      lines.push(sideBorder(`Parser warning (C#): ${col("0 chunks", C.yellow)}  ${dim(`${csharp.files} files indexed`)}`, w));
+    }
   }
   lines.push(emptyLine(w));
 
@@ -583,7 +797,7 @@ function main() {
   function renderFrame() {
     const data = gatherData(baselineCache);
     const output = render(data, true);
-    process.stdout.write(CLEAR + output);
+    process.stdout.write(HOME + output + CLEAR_DOWN);
   }
 
   renderFrame();
@@ -594,4 +808,14 @@ function main() {
   });
 }
 
-main();
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename);
+if (isMainModule) {
+  main();
+}
+
+export {
+  parseSourcePaths,
+  render,
+  scanBaseline,
+  walkDirectory
+};

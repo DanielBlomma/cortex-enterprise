@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Conditional VB.NET parser bridge for Cortex.
+ * Conditional C# parser bridge for Cortex.
  *
  * Uses a Roslyn sidecar via a pre-published DLL when a .NET SDK is available.
  * On first use the sidecar is published to bin/Release/<tfm>/publish/ and the
@@ -19,11 +19,25 @@ import { spawnSync } from "node:child_process";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_DOTNET_COMMAND = "dotnet";
-const DEFAULT_PROJECT_PATH = path.join(__dirname, "dotnet", "VbNetParser", "VbNetParser.csproj");
+const DEFAULT_PROJECT_PATH = path.join(__dirname, "dotnet", "CSharpParser", "CSharpParser.csproj");
 const DEFAULT_TARGET_FRAMEWORK = "net8.0";
 
 let runtimeCache = null;
 let publishCache = null;
+
+function hasGitCheckout(startDir) {
+  let current = startDir;
+  while (true) {
+    if (fs.existsSync(path.join(current, ".git"))) {
+      return true;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+}
 
 function getDotnetCommand() {
   const override = process.env.CORTEX_DOTNET_CMD;
@@ -31,24 +45,24 @@ function getDotnetCommand() {
 }
 
 function getProjectPath() {
-  const override = process.env.CORTEX_VBNET_PARSER_PROJECT;
+  const override = process.env.CORTEX_CSHARP_PARSER_PROJECT;
   return override && override.trim().length > 0 ? override.trim() : DEFAULT_PROJECT_PATH;
 }
 
 function getTargetFramework() {
-  const override = process.env.CORTEX_VBNET_PARSER_TFM;
+  const override = process.env.CORTEX_CSHARP_PARSER_TFM;
   return override && override.trim().length > 0 ? override.trim() : DEFAULT_TARGET_FRAMEWORK;
 }
 
 function getPublishDir() {
-  const override = process.env.CORTEX_VBNET_PUBLISH_DIR;
+  const override = process.env.CORTEX_CSHARP_PUBLISH_DIR;
   if (override && override.trim().length > 0) return override.trim();
   const projectDir = path.dirname(getProjectPath());
   return path.join(projectDir, "bin", "Release", getTargetFramework(), "publish");
 }
 
 function getDllPath() {
-  return path.join(getPublishDir(), "VbNetParser.dll");
+  return path.join(getPublishDir(), "CSharpParser.dll");
 }
 
 function getMaxSourceMtime() {
@@ -74,15 +88,28 @@ function needsPublish() {
   } catch {
     return true;
   }
+
+  if (process.env.CORTEX_CSHARP_FORCE_PUBLISH === "1") {
+    return true;
+  }
+
+  // In packaged installs there is no writable git checkout, but the
+  // published DLL is already bundled. Trust it instead of forcing an
+  // unnecessary `dotnet publish`, which can fail offline and leave C#
+  // repos with 0 chunks.
+  if (!hasGitCheckout(__dirname)) {
+    return false;
+  }
+
   return getMaxSourceMtime() > dllMtime;
 }
 
-export function resetVbNetParserRuntimeCache() {
+export function resetCSharpParserRuntimeCache() {
   runtimeCache = null;
   publishCache = null;
 }
 
-export function getVbNetParserRuntime() {
+export function getCSharpParserRuntime() {
   if (runtimeCache) {
     return runtimeCache;
   }
@@ -115,14 +142,14 @@ export function getVbNetParserRuntime() {
   return runtimeCache;
 }
 
-export function isVbNetParserAvailable() {
-  return getVbNetParserRuntime().available;
+export function isCSharpParserAvailable() {
+  return getCSharpParserRuntime().available;
 }
 
-export function ensureVbNetParserPublished() {
+export function ensureCSharpParserPublished() {
   if (publishCache) return publishCache;
 
-  const runtime = getVbNetParserRuntime();
+  const runtime = getCSharpParserRuntime();
   if (!runtime.available) {
     publishCache = { ok: false, reason: runtime.reason };
     return publishCache;
@@ -135,7 +162,7 @@ export function ensureVbNetParserPublished() {
   }
 
   if (!process.env.CORTEX_QUIET) {
-    process.stderr.write("[cortex] Publishing Roslyn VB.NET parser (one-time, ~15s)...\n");
+    process.stderr.write("[cortex] Publishing Roslyn C# parser (one-time, ~15s)...\n");
   }
 
   const result = spawnSync(
@@ -166,17 +193,17 @@ export function ensureVbNetParserPublished() {
   return publishCache;
 }
 
-export function parseCode(code, filePath, language = "vbnet") {
-  const runtime = getVbNetParserRuntime();
+export function parseCode(code, filePath, language = "csharp") {
+  const runtime = getCSharpParserRuntime();
   if (!runtime.available) {
     return { chunks: [], errors: [] };
   }
 
-  const published = ensureVbNetParserPublished();
+  const published = ensureCSharpParserPublished();
   if (!published.ok) {
     return {
       chunks: [],
-      errors: [{ message: `VB.NET parser publish failed: ${published.reason}` }]
+      errors: [{ message: `C# parser publish failed: ${published.reason}` }]
     };
   }
 
@@ -204,7 +231,7 @@ export function parseCode(code, filePath, language = "vbnet") {
           message:
             result.error?.message ||
             result.stderr?.trim() ||
-            `VB.NET parser failed with exit code ${result.status ?? "unknown"}`
+            `C# parser failed with exit code ${result.status ?? "unknown"}`
         }
       ]
     };
@@ -221,10 +248,98 @@ export function parseCode(code, filePath, language = "vbnet") {
       chunks: [],
       errors: [
         {
-          message: `VB.NET parser returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+          message: `C# parser returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
         }
       ]
     };
+  }
+}
+
+/**
+ * Batch-parse an entire C# project as one CSharpCompilation, enabling
+ * SemanticModel-based call resolution. Calls are emitted as fully-
+ * qualified names (e.g. "System.IO.File.ReadAllText") instead of
+ * short names. Unresolved calls fall back to the syntax name.
+ *
+ * @param {Array<{path: string, content: string}>} files
+ * @returns {Map<string, {chunks: Array, errors: Array}>}
+ */
+export function parseProject(files) {
+  const runtime = getCSharpParserRuntime();
+  if (!runtime.available) {
+    const empty = new Map();
+    for (const file of files) {
+      empty.set(file.path, { chunks: [], errors: [] });
+    }
+    return empty;
+  }
+
+  const published = ensureCSharpParserPublished();
+  if (!published.ok) {
+    const errors = [{ message: `C# parser publish failed: ${published.reason}` }];
+    const fallback = new Map();
+    for (const file of files) {
+      fallback.set(file.path, { chunks: [], errors });
+    }
+    return fallback;
+  }
+
+  const args = [published.dllPath, "--batch"];
+
+  const payload = JSON.stringify({
+    files: files.map((f) => ({ path: f.path, source: f.content }))
+  });
+
+  const result = spawnSync(runtime.command, args, {
+    input: payload,
+    encoding: "utf8",
+    timeout: 120000,
+    maxBuffer: 256 * 1024 * 1024
+  });
+
+  if (result.error || result.status !== 0) {
+    const errors = [
+      {
+        message:
+          result.error?.message ||
+          result.stderr?.trim() ||
+          `C# batch parser failed with exit code ${result.status ?? "unknown"}`
+      }
+    ];
+    const fallback = new Map();
+    for (const file of files) {
+      fallback.set(file.path, { chunks: [], errors });
+    }
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout);
+    const out = new Map();
+    const perFile = parsed.files ?? {};
+    for (const file of files) {
+      const entry = perFile[file.path];
+      if (entry) {
+        out.set(file.path, {
+          chunks: Array.isArray(entry.chunks) ? entry.chunks : [],
+          errors: Array.isArray(entry.errors) ? entry.errors : []
+        });
+      } else {
+        out.set(file.path, { chunks: [], errors: [] });
+      }
+    }
+    return out;
+  } catch (error) {
+    const errors = [
+      {
+        message: `C# batch parser returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+      }
+    ];
+    const fallback = new Map();
+    for (const file of files) {
+      fallback.set(file.path, { chunks: [], errors });
+    }
+    return fallback;
   }
 }
 
@@ -232,11 +347,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const filePath = process.argv[2];
 
   if (!filePath) {
-    console.error("Usage: vbnet.mjs <file.vb>");
+    console.error("Usage: csharp.mjs <file.cs>");
     process.exit(1);
   }
 
   const code = fs.readFileSync(filePath, "utf8");
-  const result = parseCode(code, filePath, "vbnet");
+  const result = parseCode(code, filePath, "csharp");
   console.log(JSON.stringify(result, null, 2));
 }
